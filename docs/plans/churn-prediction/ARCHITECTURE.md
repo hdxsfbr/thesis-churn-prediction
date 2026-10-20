@@ -177,7 +177,7 @@ All tables are created by `sql/migrations/V00x__*.sql`, applied by `churn migrat
 | `RUN_LOCKS` | lock_name | holder, heartbeat_at, ttl_s |
 | `CONFIG_SNAPSHOTS` | run_id | effective runtime config + validity |
 | `FEATURES` | run_id, subscriber_key | feature vector (VARIANT/JSON + typed core columns), retained N days |
-| `RISK_SCORES` | run_id, subscriber_key | churn_prob, tier, top_factors (array of {feature, label, direction, contribution, value}), archetype, archetype_conf, archetype_probs, model_version, scored_at; history kept |
+| `RISK_SCORES` | run_id, subscriber_key | churn_prob, tier, top_factors (array of {feature, label, direction, contribution, value}, ranked by \|contribution\|; stored as JSON array text in a `VARCHAR` column, added by `V014__risk_scores_top_factors.sql`, so readers `json.loads` / `PARSE_JSON` it), archetype, archetype_conf, archetype_probs, model_version, scored_at; history kept |
 | `MODEL_REGISTRY` | model_version | artefact URI, train window, metrics json, status (candidate/promoted/rejected/retired), reason |
 | `HOLDOUT_ASSIGNMENTS` | subscriber_key | group (control/treatment), salt_version, assigned_at |
 | `INTERVENTION_LOG` | decision_id | full audit (R6.1): subscriber_key, run_id, risk, tier, archetype(+conf), top_factors, intervention_type, params (offer code etc.), content_ref, content_source (llm/template), rationale (structured json + text), policy_scores, guardrail_events, gate_reason, approval_status, execution_status, outbox_id, response, outcome, timestamps (decided/approved/dispatched/outcome_at) |
