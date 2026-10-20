@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time
 
 import pandas as pd
@@ -21,10 +22,42 @@ def _status_list(settings: Settings) -> str:
     return ", ".join("'" + s.replace("'", "''") + "'" for s in settings.scoring.active_statuses)
 
 
+DOMAIN_FILES = ("orders", "subscription_events", "email", "support", "quiz")
+_HEADER = re.compile(r"^--\s*(requires|columns):\s*(.*)$")
+
+
+def _domain_cte(settings: Settings, contract: Contract, domain: str) -> tuple[str, str | None]:
+    """The CTE text of one domain file, and the contract view it needs (None if that view is not mapped).
+
+    When the view is missing the domain becomes an empty CTE with the same typed columns, so the master
+    query runs unchanged: counts default to 0, rates stay NULL and has_<domain> is 0 (R2.4).
+    """
+    text = (settings.sql_dir / "features" / f"{domain}.sql").read_text()
+    meta: dict[str, str] = {}
+    body = []
+    for line in text.splitlines():
+        m = _HEADER.match(line.strip())
+        if m:
+            meta[m.group(1)] = m.group(2).strip()
+        else:
+            body.append(line)
+    view = meta.get("requires")
+    if view and view not in contract.views:
+        cols = []
+        for spec in meta["columns"].split(","):
+            name, _, typ = spec.strip().partition(":")
+            cols.append(f"CAST(NULL AS {typ or 'DOUBLE'}) AS {name}")
+        return f"{domain}_agg AS (SELECT {', '.join(cols)} WHERE 1 = 0)", view
+    return "\n".join(body).strip(), view
+
+
 def render_feature_sql(settings: Settings, contract: Contract, name: str = "subscriptions") -> str:
     text = (settings.sql_dir / "features" / f"{name}.sql").read_text()
-    return text.replace("{{contract_ctes}}", contract_ctes(contract, settings.key_pepper)).replace(
-        "{{active_statuses}}", _status_list(settings)
+    domain_ctes = ",\n".join(_domain_cte(settings, contract, d)[0] for d in DOMAIN_FILES)
+    return (
+        text.replace("{{contract_ctes}}", contract_ctes(contract, settings.key_pepper))
+        .replace("{{domain_ctes}}", domain_ctes)
+        .replace("{{active_statuses}}", _status_list(settings))
     )
 
 
