@@ -36,11 +36,19 @@ def migrate() -> None:
 
 
 @app.command()
-def synth(scale: str = typer.Option("tiny", help="tiny | small | default")) -> None:
-    """Write synthetic subscriptions and orders into THESIS_SYNTH."""
+def synth(
+    scale: str = typer.Option("tiny", help="tiny | small | default"),
+    profile: bool = typer.Option(False, "--profile", help="Also write docs/data-profile.md and CHURN_OPS.DATA_PROFILE"),
+) -> None:
+    """Write the synthetic source (all contract views) into THESIS_SYNTH."""
     settings, wh = _open()
     counts = generate(wh, settings, scale=scale)
     typer.echo(f"synthesised {counts['subscriptions']} subscriptions, {counts['orders']} orders")
+    if profile:
+        from churn.synth.profile import write_profile
+
+        report = write_profile(wh, settings)
+        typer.echo(f"profile written: {sum(report.view_rows.values())} rows across {len(report.view_rows)} views")
 
 
 @app.command()

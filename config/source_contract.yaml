@@ -31,3 +31,70 @@ views:
       discount_usd: {source: discount_usd, type: number}
       refund_usd:   {source: refund_usd,   type: number}
       refunded_at:  {source: refunded_at,  type: timestamp}
+  subscription_events:
+    object: "{schema}.subscription_events"
+    dedup_key: event_id
+    loaded_at: loaded_at
+    columns:
+      event_id:        {source: event_id,        type: varchar}
+      customer_id:     {source: customer_id,     type: varchar}
+      subscription_id: {source: subscription_id, type: varchar}
+      event_type:      {source: event_type,      type: varchar}
+      event_ts:        {source: event_ts,        type: timestamp}
+      detail:          {source: detail,          type: varchar}
+  products:
+    object: "{schema}.products"
+    dedup_key: sku
+    loaded_at: loaded_at
+    columns:
+      sku:           {source: sku,           type: varchar}
+      product_name:  {source: product_name,  type: varchar}
+      goal_category: {source: goal_category, type: varchar}
+      price_usd:     {source: price_usd,     type: number}
+      status:        {source: status,        type: varchar}
+  email_events:
+    object: "{schema}.email_events"
+    dedup_key: event_id
+    loaded_at: loaded_at
+    columns:
+      event_id:      {source: event_id,      type: varchar}
+      customer_id:   {source: customer_id,   type: varchar}
+      event_type:    {source: event_type,    type: varchar}
+      campaign_id:   {source: campaign_id,   type: varchar}
+      flow:          {source: flow,          type: varchar}
+      event_ts:      {source: event_ts,      type: timestamp}
+      tz_offset_min: {source: tz_offset_min, type: number}
+  support_tickets:
+    object: "{schema}.support_tickets"
+    dedup_key: ticket_id
+    loaded_at: loaded_at
+    columns:
+      ticket_id:     {source: ticket_id,     type: varchar}
+      customer_id:   {source: customer_id,   type: varchar}
+      category:      {source: category,      type: varchar}
+      created_at:    {source: created_at,    type: timestamp}
+      resolved_at:   {source: resolved_at,   type: timestamp}
+      sentiment:     {source: sentiment,     type: number}
+      status:        {source: status,        type: varchar}
+      tz_offset_min: {source: tz_offset_min, type: number}
+  quiz_responses:
+    object: "{schema}.quiz_responses"
+    dedup_key: response_id
+    loaded_at: loaded_at
+    columns:
+      response_id:  {source: response_id,  type: varchar}
+      customer_id:  {source: customer_id,  type: varchar}
+      question_key: {source: question_key, type: varchar}
+      answer_value: {source: answer_value, type: varchar}
+      answered_at:  {source: answered_at,  type: timestamp}
+  customers_pii:
+    object: "{schema}.customers_pii"
+    dedup_key: customer_id
+    loaded_at: loaded_at
+    columns:
+      customer_id: {source: customer_id, type: varchar}
+      first_name:  {source: first_name,  type: varchar}
+      last_name:   {source: last_name,   type: varchar}
+      email:       {source: email,       type: varchar}
+      phone:       {source: phone,       type: varchar}
+      postal_code: {source: postal_code, type: varchar}
