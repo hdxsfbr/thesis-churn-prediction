@@ -1,0 +1,33 @@
+# Source contract (R1.3): logical view -> physical object + column mapping.
+# Pointing the pipeline at real Thesis views means editing this file only.
+# `{schema}` expands to the schema named below.
+schema: THESIS_SYNTH
+
+views:
+  subscriptions:
+    object: "{schema}.subscriptions"
+    dedup_key: subscription_id
+    loaded_at: loaded_at
+    columns:
+      customer_id:        {source: customer_id,        type: varchar}
+      subscription_id:    {source: subscription_id,    type: varchar}
+      status:             {source: status,             type: varchar}
+      started_at:         {source: started_at,         type: timestamp}
+      cancelled_at:       {source: cancelled_at,       type: timestamp}
+      cancel_type:        {source: cancel_type,        type: varchar}
+      cancel_reason_code: {source: cancel_reason_code, type: varchar}
+      price_usd:          {source: price_usd,          type: number}
+      interval_days:      {source: interval_days,      type: number}
+  orders:
+    object: "{schema}.orders"
+    dedup_key: order_id
+    loaded_at: loaded_at
+    columns:
+      order_id:     {source: order_id,     type: varchar}
+      customer_id:  {source: customer_id,  type: varchar}
+      ordered_at:   {source: ordered_at,   type: timestamp}
+      blend_sku:    {source: blend_sku,    type: varchar}
+      amount_usd:   {source: amount_usd,   type: number}
+      discount_usd: {source: discount_usd, type: number}
+      refund_usd:   {source: refund_usd,   type: number}
+      refunded_at:  {source: refunded_at,  type: timestamp}

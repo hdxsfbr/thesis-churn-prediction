@@ -1,0 +1,40 @@
+backend: duckdb
+
+warehouse:
+  path: artefacts/local.duckdb
+
+artefacts_dir: artefacts
+
+schemas:
+  synth: THESIS_SYNTH
+  ops: CHURN_OPS
+
+contract_path: config/source_contract.yaml
+
+scoring:
+  active_statuses: [ACTIVE, PAUSED, PAST_DUE]
+
+label:
+  horizon_days: 30
+
+synth:
+  seed: 20250630
+  end_date: "2025-06-30"
+  history_months: 24
+  scales:
+    tiny: 1500
+    small: 30000
+    default: 350000
+
+model:
+  seed: 7
+  min_history_days: 60
+  calibration_share: 0.25
+  lightgbm:
+    n_estimators: 150
+    learning_rate: 0.05
+    num_leaves: 15
+    min_child_samples: 20
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.8
