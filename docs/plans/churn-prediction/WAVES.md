@@ -1,0 +1,184 @@
+# Waves: Churn Prediction & Intervention Agent
+
+Input: `docs/plans/churn-prediction/TASKS.md` (tickets T1–T28). A wave is built in parallel, and the next wave starts once the previous one is merged.
+
+Rules this plan follows:
+- Every ticket is in exactly one wave, and waves are numbered 1–15 with no gaps.
+- A ticket comes after every ticket it depends on.
+- No two tickets in the same wave list the same file. The "Shared files" table in TASKS.md was checked wave by wave.
+
+The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py` is touched by 11 tickets and `src/churn/orchestration/runner.py` by 9, so those tickets have to go in different waves.
+
+## Overview
+
+| Wave | Tickets | Goal |
+|---|---|---|
+| 1 | T1 | Thinnest end-to-end path: synth → train → score into RISK_SCORES on DuckDB, plus the project skeleton |
+| 2 | T2, T3, T6 | Full synthetic source, hardened source contract, explainable scores |
+| 3 | T4, T5 | Full feature catalogue; the runtime config table drives risk tiers |
+| 4 | T7, T10 | Archetype classifier; agent thin path to OUTBOX and INTERVENTION_LOG |
+| 5 | T8, T9, T11, T14 | Evaluation report, logging and error taxonomy, all four intervention paths, approval gate |
+| 6 | T13, T24 | Contextual Thompson-sampling policy; Snowflake backend and bootstrap |
+| 7 | T12, T15, T26, T27 | Guardrails, LLM content with fallback, extensibility, full-scale throughput |
+| 8 | T16, T25 | Holdout, simulated responses, outcome tracking; PII proof |
+| 9 | T17, T18 | Feedback loops into selection (posteriors) and scoring (retrain) |
+| 10 | T19 | Run metrics and the evaluation run |
+| 11 | T20 | Failure recovery: checkpoints, run lock, fault injection |
+| 12 | T21 | FastAPI service |
+| 13 | T22 | Scheduled worker |
+| 14 | T23 | Containerised deployment and deployment guide |
+| 15 | T28 | Documentation set and submission deliverables |
+
+## Wave 1 — prove the design
+
+**Tickets:** T1
+
+**Goal:** the thinnest slice that proves the architecture. Synthetic subscriptions pass through the source contract and one feature SQL file into a calibrated LightGBM model. Every active subscriber is scored into `CHURN_OPS.RISK_SCORES`, and a `RUNS` row is written, through the warehouse protocol, MERGE writer and migrations.
+
+**Why alone:** every other ticket builds on the skeleton T1 creates.
+
+## Wave 2 — widen the data and the score
+
+**Tickets:** T2, T3, T6
+
+**Goal:**
+- T2: all source domains with latent archetypes and edge cases.
+- T3: the source contract fails safely, deduplicates events, normalises to UTC and pseudonymises keys, and can be swapped by config.
+- T6: every score carries its top factors.
+
+**Why parallel:** each needs only T1. They touch separate files:
+- T2: synth, `source_contract.yaml`, `cli.py`
+- T3: contract modules, `settings.py`, `runner.py`
+- T6: `model/explain.py`, `model/score.py`, `features/registry.py`
+
+## Wave 3 — features and runtime config
+
+**Tickets:** T4, T5
+
+**Goal:**
+- T4: the full feature catalogue (five leading indicators, multi-window trends, no leakage, missing-domain handling). It needs T2's domains.
+- T5: `AGENT_CONFIG` with pinned snapshots and fail-safe validation, which drives the risk tiers.
+
+**Why parallel:** T4 touches the feature SQL, `features/registry.py` and `features/builder.py`. T5 touches the runtime config, `model/score.py`, `runner.py` and `cli.py`. No file overlaps. T6 already changed `registry.py` and `score.py`, but in wave 2.
+
+## Wave 4 — archetypes and the agent thin path
+
+**Tickets:** T7, T10
+
+**Goal:**
+- T7: archetype, confidence and a low-confidence flag on every at-risk score. It needs T2's reason codes.
+- T10: an at-risk subscriber, identified through T5's tiers, gets a check-in email written to OUTBOX and INTERVENTION_LOG by the new decide/dispatch step.
+
+**Why parallel:** T7 stays inside `model/` (`train.py`, `score.py`, `archetype.py`). T10 creates `interventions/`, `agent/` and `execution/` and changes `runner.py`. No file overlaps.
+
+## Wave 5 — widen model, agent and operations
+
+**Tickets:** T8, T9, T11, T14
+
+**Goal:**
+- T8: the honest evaluation report and model card (needs T7 for per-archetype metrics).
+- T9: structured logging and the error taxonomy in the runner.
+- T11: the formulation, retention-offer and escalation paths (needs T10 and T4's `has_quiz`).
+- T14: the threshold gate and the approval table lifecycle (needs T10 and T5's snapshot).
+
+**Why parallel:** the four file sets are disjoint:
+- T8: `model/evaluate.py`, V005, `cli.py`
+- T9: `pyproject.toml`, `obs/`, `runner.py`
+- T11: new intervention modules, `interventions.yaml`, `agent/content.py`
+- T14: `agent/gate.py`, `execution/approvals.py`, `agent/cycle.py`, V009
+
+## Wave 6 — context-aware selection and Snowflake
+
+**Tickets:** T13, T24
+
+**Goal:**
+- T13: replaces the deterministic choice with the contextual Thompson-sampling policy and per-decision rationale. It needs T7, T10 and T11.
+- T24: the Snowflake backend, bootstrap of schemas and roles, the `OUTBOX_FOR_SENDER` view (needs T10's OUTBOX) and the SQL portability test.
+
+**Why parallel:** T13 touches `agent/` (`policy.py`, `rationale.py`, `cycle.py`), V008 and `runtime_defaults.yaml`. T24 touches the warehouse, bootstrap SQL, V013, `pyproject.toml` and `cli.py`. No file overlaps.
+
+## Wave 7 — guardrails, LLM content, extensibility, scale
+
+**Tickets:** T12, T15, T26, T27
+
+**Goal:**
+- T12: guardrails and coverage gaps. It comes after T14 because the duplicate-pending rule reads APPROVALS.
+- T15: LLM-personalised content behind a PII-free prompt, with template fallback for all four types from T11.
+- T26: interventions loaded by dotted path, plus the module-boundary test (needs T13's priors for the dummy arm).
+- T27: full-scale data and a timed cycle.
+
+**Why parallel:** the file sets are disjoint:
+- T12: `agent/guardrails.py`, `agent/cycle.py`, V007
+- T15: `llm/`, `agent/content.py`, `pyproject.toml`, `config/settings.yaml`
+- T26: `interventions/base.py`, the test fixture, `docs/extending.md`
+- T27: `synth/generator.py`, `cli.py`
+
+## Wave 8 — outcomes and PII proof
+
+**Tickets:** T16, T25
+
+**Goal:**
+- T16: the holdout, simulated responses, outcome closing after 30 days, `churn simulate` and the treated-vs-control report.
+- T25: log redaction and a full-cycle PII scan. The scan covers APPROVALS (T14) and the LLM prompts (T15), so it waits for both.
+
+**Why parallel:** T16 touches `feedback/`, `synth/responder.py`, `agent/cycle.py`, `runner.py`, `cli.py`, V010 and `impact.sql`. T25 touches only `obs/logging.py` and its own tests.
+
+## Wave 9 — feedback loops
+
+**Tickets:** T17, T18
+
+**Goal:**
+- T17: closed outcomes update the policy posteriors, so selection shifts toward what works.
+- T18: intervention history and observed outcomes enter retraining, behind a promotion gate that uses T8's metrics.
+
+Both need T16's outcomes.
+
+**Why parallel:** T17 touches `feedback/policy_stats.py` and `runner.py`. T18 touches `feedback/retrain.py`, `model/registry.py`, `model/dataset.py`, `features/registry.py`, `interventions.sql` and `cli.py`. No file overlaps.
+
+## Wave 10 — run metrics
+
+**Tickets:** T19
+
+**Goal:** coverage, autonomy rate, audit completeness, LLM usage and treated-vs-control churn for each run, plus the 45-day evaluation run. It needs the holdout (T16), approvals (T14), coverage gaps (T12) and LLM fallbacks (T15).
+
+**Why alone:** it changes `runner.py`, which T17 changes in wave 9 and T20 in wave 11.
+
+## Wave 11 — failure recovery
+
+**Tickets:** T20
+
+**Goal:** step and shard checkpoints, the run lock, source retries, and fault injection over the full cycle, including an LLM outage (T15) and the error taxonomy (T9).
+
+**Why alone:** it changes `runner.py` and `agent/cycle.py`. Every remaining ticket that could run beside it either touches those files or depends on T20's lock.
+
+## Wave 12 — API service
+
+**Tickets:** T21
+
+**Goal:** health, readiness, triggering runs behind the lock (T20) and inspecting runs and metrics (T19) over FastAPI.
+
+**Why alone:** T22 shares `pyproject.toml` and `cli.py` with it.
+
+## Wave 13 — scheduled operation
+
+**Tickets:** T22
+
+**Goal:** a worker with the daily cycle, the retrain cron (T18) and catch-up, guarded by the lock (T20).
+
+**Why alone:** it shares `pyproject.toml` and `cli.py` with T21, and T23 deploys the worker it adds.
+
+## Wave 14 — deployment
+
+**Tickets:** T23
+
+**Goal:** a non-root image for the `api` (T21) and `worker` (T22) services, `.env.example` covering the Snowflake settings (T24), and the deployment guide with the config-only switch to production views. The end-to-end check is done by the operator.
+
+**Why alone:** it needs T21, T22 and T24 merged. T28 checks that `docs/deployment.md` exists, so T28 must come after it.
+
+## Wave 15 — documentation and deliverables
+
+**Tickets:** T28
+
+**Goal:** the full document set and the test-results report. The docs test checks every ops table and runtime config key added by all earlier tickets.
+
+**Why last:** it documents the finished system.
