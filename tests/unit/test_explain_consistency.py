@@ -31,7 +31,11 @@ def fitted():
             "discount_share_365": rng.uniform(0, 0.5, n),
             "refund_count_365": rng.integers(0, 3, n).astype(float),
         }
-    )[FEATURE_COLUMNS]
+    )
+    for extra in FEATURE_COLUMNS:  # the rest of the catalogue: uninformative noise
+        if extra not in X:
+            X[extra] = rng.uniform(0, 5, n)
+    X = X[FEATURE_COLUMNS]
     logit = 0.02 * X["days_since_last_order"] - 0.003 * X["tenure_days"] + 0.5 * X["refund_count_365"] - 1.5
     y = (rng.uniform(size=n) < 1 / (1 + np.exp(-logit))).astype(int)
     X.loc[rng.choice(n, 50, replace=False), "discount_share_365"] = np.nan
