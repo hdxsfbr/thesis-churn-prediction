@@ -1,4 +1,4 @@
-"""Load and validate the source contract (config/source_contract.yaml)."""
+"""Load the source contract (config/source_contract.yaml)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import yaml
 from pydantic import BaseModel
 
 from churn.settings import Settings
-from churn.warehouse.base import Warehouse
 
 
 class ContractError(RuntimeError):
@@ -17,7 +16,8 @@ class ContractError(RuntimeError):
 
 class Column(BaseModel):
     source: str
-    type: str
+    type: str  # varchar | number | timestamp | timestamp_tz | boolean
+    tz: str | None = None  # source time zone of a naive `timestamp` column (default: already UTC)
 
 
 class View(BaseModel):
@@ -42,25 +42,3 @@ def load_contract(path: Path | str) -> Contract:
 
 def contract_for(settings: Settings) -> Contract:
     return load_contract(settings.contract_file)
-
-
-def validate(wh: Warehouse, contract: Contract) -> None:
-    """Every mapped object must exist and carry every mapped source column."""
-    problems: list[str] = []
-    for name, view in contract.views.items():
-        *_, schema, table = contract.physical(name).split(".")
-        found = wh.query(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE UPPER(table_schema) = UPPER(:s) AND UPPER(table_name) = UPPER(:t)",
-            {"s": schema, "t": table},
-        )
-        have = {c.upper() for c in found["column_name"]}
-        if not have:
-            problems.append(f"{name}: object {contract.physical(name)} not found")
-            continue
-        wanted = {c.source for c in view.columns.values()} | {view.loaded_at}
-        missing = sorted(c for c in wanted if c.upper() not in have)
-        if missing:
-            problems.append(f"{name}: missing columns {missing}")
-    if problems:
-        raise ContractError("; ".join(problems))

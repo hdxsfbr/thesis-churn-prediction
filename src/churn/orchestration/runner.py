@@ -11,7 +11,9 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from churn.contract.loader import contract_for, validate
+from churn.contract.loader import contract_for
+from churn.contract.validate import validate
+from churn.contract.views import populate_key_map
 from churn.features.builder import as_of_ts, build_features, count_active
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
@@ -71,6 +73,7 @@ def run_cycle(
         frame = score_frame(wh, settings, features, run_id, as_of_dt)
 
         with wh.transaction():
+            populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)
             wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
             wh.merge_frame(f"{ops}.RISK_SCORES", frame, keys=["run_id", "subscriber_key"])
             scored = int(
