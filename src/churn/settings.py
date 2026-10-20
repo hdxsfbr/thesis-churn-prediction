@@ -28,6 +28,7 @@ class WarehouseSettings(BaseModel):
 class Schemas(BaseModel):
     synth: str = "THESIS_SYNTH"
     ops: str = "CHURN_OPS"
+    private: str = "CHURN_PRIVATE"
 
 
 class Scoring(BaseModel):
@@ -72,6 +73,8 @@ class Settings(BaseModel):
         data = _deep_merge(data, overrides or {})
         if "CHURN_DUCKDB_PATH" in os.environ and not (overrides or {}).get("warehouse"):
             data.setdefault("warehouse", {})["path"] = os.environ["CHURN_DUCKDB_PATH"]
+        if os.environ.get("CHURN_CONTRACT_PATH"):
+            data["contract_path"] = os.environ["CHURN_CONTRACT_PATH"]
         data["key_pepper"] = os.environ.get("CHURN_KEY_PEPPER", "dev-pepper-not-secret")
         return cls.model_validate(data)
 
