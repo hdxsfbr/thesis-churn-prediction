@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from churn import runtime_config
 from churn.model.train import train
 from churn.settings import Settings
 from churn.synth.generator import generate
@@ -39,6 +40,7 @@ def pipeline(settings):
     """Migrated warehouse with tiny synthetic data and one promoted model."""
     wh = DuckDBWarehouse(":memory:")
     apply_migrations(wh, settings)
+    runtime_config.seed(wh, settings)
     generate(wh, settings, scale="tiny")
     version = train(wh, settings)
     yield {"wh": wh, "settings": settings, "model_version": version}

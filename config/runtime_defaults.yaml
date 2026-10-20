@@ -1,0 +1,31 @@
+# Seed values for CHURN_OPS.AGENT_CONFIG (ARCHITECTURE A6/A7). `churn bootstrap` inserts keys that are
+# missing and never overwrites edits; after that the table is the source of truth (editable in Metabase).
+tiers:
+  # Lower bound of each tier: low < medium <= p < high <= p < critical.
+  boundaries:
+    medium: 0.20
+    high: 0.45
+    critical: 0.70
+  at_risk_from: medium
+
+gate:
+  # needs_approval = risk >= t_risk or cost >= t_cost_usd or discount_pct >= t_discount_pct or type in always_approve
+  t_risk: 0.85
+  t_cost_usd: 15
+  t_discount_pct: 20
+  always_approve: []
+
+guardrails:
+  contact_cap_14d: 1
+  contact_cap_90d: 3
+  max_discount_pct: 25
+  offer_catalogue: [FREE_SHIPPING, PCT_10_NEXT, PCT_20_NEXT, PCT_25_NEXT_2, FREE_SAMPLE_BLEND]
+  approval_expiry_h: 72
+
+holdout:
+  share: 0.10
+  salt_version: v1
+
+outcomes:
+  window_days: 30
+  response_window_days: 7
