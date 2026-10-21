@@ -1,3 +1,11 @@
+## Rules for parallel ticket runs (read before every ticket)
+
+- Doc Auditor and Builder in a ticket run must NOT edit `docs/plans/<feature>/ARCHITECTURE.md`, `PRD.md`, `TASKS.md` or `WAVES.md`. Put every as-built note, deviation and follow-up for the ticket only in `docs/plans/<feature>/tickets/<ticket>.md` under a heading "Proposed ARCHITECTURE notes". Only plan revisions and the wave wrap-up (Ship) run apply such notes to the shared plan documents.
+- Before building, check that main actually contains every ticket this one depends on (per WAVES.md/TASKS.md). If a dependency's files are missing, stop and escalate instead of re-creating another ticket's files.
+- Only change files listed in your ticket's slice (plus the minimum needed in shared files). Never delete or rewrite files that belong to other tickets; if a file outside your slice looks wrong or missing, report it, do not fix it.
+- Shared hot files (`src/churn/cli.py`, `src/churn/orchestration/runner.py`, `tests/conftest.py`): keep edits small and additive (new functions/commands appended, no reordering or reformatting) to keep merges clean.
+- Migrations: use the next free version number on main at build time; never edit a migration that already shipped.
+
 ## Lessons
 
 ### churn-prediction, wave 1 (2026-10-20)

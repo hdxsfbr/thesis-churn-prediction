@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff"]
+dev = ["pytest>=8", "ruff==0.17.1"]
 
 [project.scripts]
 churn = "churn.cli:app"
