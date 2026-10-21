@@ -33,7 +33,9 @@ def build_frames(settings: Settings, n: int) -> tuple[pd.DataFrame, pd.DataFrame
     start_day = rng.uniform(0, total_days - 14, n)
     interval = rng.choice(latent.INTERVALS, n)
     price = rng.choice(latent.PRICES, n)
-    to_cancel, voluntary, reason = latent.draw_cancellation(rng, traits, start_day)
+    to_cancel, voluntary, _ = latent.draw_cancellation(rng, traits, start_day)
+    archetype = latent.draw_archetypes(cfg.seed, n)
+    reason = latent.reasons_for(cfg.seed, archetype)
     cancel_day = start_day + to_cancel
     cancelled = cancel_day <= total_days
 
@@ -60,12 +62,17 @@ def build_frames(settings: Settings, n: int) -> tuple[pd.DataFrame, pd.DataFrame
         }
     )
 
-    idx, day = latent.order_times(rng, start_day, interval, cancel_day, voluntary, total_days + 1)
+    stretch = latent.by_archetype(latent.STRETCH_SCALE, archetype, 1.0)
+    idx, day = latent.order_times(
+        rng, start_day, interval, cancel_day, voluntary, total_days + 1, stretch_scale=stretch
+    )
     m = len(idx)
     amount = price[idx]
-    discounted = rng.random(m) < 0.05 + 0.7 * traits.price_sensitivity[idx]
+    discount_boost = latent.by_archetype(latent.DISCOUNT_BOOST, archetype)
+    refund_boost = latent.by_archetype(latent.REFUND_BOOST, archetype)
+    discounted = rng.random(m) < 0.05 + 0.7 * traits.price_sensitivity[idx] + discount_boost[idx]
     discount = np.where(discounted, amount * rng.uniform(0.1, 0.3, m), 0.0).round(2)
-    refunded = rng.random(m) < 0.01 + 0.15 * traits.fatigue[idx]
+    refunded = rng.random(m) < 0.01 + 0.15 * traits.fatigue[idx] + refund_boost[idx]
     refund_day = day + 5
     refunded &= refund_day <= total_days
     ordered_at = _ts(hist_start, day)
@@ -83,6 +90,12 @@ def build_frames(settings: Settings, n: int) -> tuple[pd.DataFrame, pd.DataFrame
         }
     )
     return subs, orders
+
+
+def latent_archetypes(settings: Settings, scale: str = "tiny") -> pd.Series:
+    """The generator's latent archetype per customer_id: ground truth for judging the classifier, never a feature."""
+    n = settings.synth.scales[scale]
+    return pd.Series(latent.draw_archetypes(settings.synth.seed, n), index=[f"c{i:07d}" for i in range(n)])
 
 
 def generate(wh: Warehouse, settings: Settings, scale: str = "tiny") -> dict[str, int]:

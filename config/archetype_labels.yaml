@@ -1,0 +1,29 @@
+# Weak labels for the archetype classifier (ARCHITECTURE A3).
+# A churned subscriber's archetype is taken from the cancellation reason code; when the code is missing or
+# unmapped, from the most frequent mapped support-ticket category. Anything else has no label and is left out
+# of training. Keys are matched case-insensitively.
+archetypes:
+  - price_sensitive
+  - efficacy_dissatisfied
+  - fatigued
+  - life_change
+
+reason_codes:
+  TOO_EXPENSIVE: price_sensitive
+  PRICE: price_sensitive
+  NOT_WORKING: efficacy_dissatisfied
+  NO_RESULTS: efficacy_dissatisfied
+  TOO_MANY: fatigued
+  STOCKPILED: fatigued
+  LIFE_CHANGE: life_change
+  MOVING: life_change
+
+ticket_categories:
+  billing: price_sensitive
+  price: price_sensitive
+  product_not_working: efficacy_dissatisfied
+  efficacy: efficacy_dissatisfied
+  too_much_product: fatigued
+  delivery_frequency: fatigued
+  address_change: life_change
+  pause_request: life_change

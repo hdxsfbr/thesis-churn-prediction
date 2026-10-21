@@ -8,11 +8,25 @@ from datetime import date, datetime
 import pandas as pd
 
 from churn.features.builder import as_of_ts
+from churn.model.archetype import predict_archetype
 from churn.model.explain import explain
 from churn.model.registry import load_promoted
 from churn.runtime_config import RuntimeConfig, assign_tiers
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
+
+
+def _archetype_columns(model, X: pd.DataFrame) -> dict:
+    """Archetype, confidence, probabilities and low-confidence flag for every row (nulls when no classifier)."""
+    if model is None:
+        return {"archetype": None, "archetype_conf": None, "archetype_probs": None, "archetype_low_conf": None}
+    c = predict_archetype(model, X)
+    return {
+        "archetype": c.archetype,
+        "archetype_conf": c.confidence,
+        "archetype_probs": c.probs_json,
+        "archetype_low_conf": c.low_confidence,
+    }
 
 
 def score_frame(
@@ -24,6 +38,7 @@ def score_frame(
     X = features[bundle["features"]]
     probs = bundle["model"].predict_proba(X)[:, 1]
     factors = explain(bundle["model"], X)
+    archetype = _archetype_columns(bundle.get("archetype"), X)
     return pd.DataFrame(
         {
             "run_id": run_id,
@@ -32,6 +47,7 @@ def score_frame(
             "churn_prob": probs,
             "tier": assign_tiers(probs, config.tiers) if config and config.tiers else None,
             "top_factors": [json.dumps(f) for f in factors],
+            **archetype,
             "model_version": version,
             "scored_at": datetime.now(),
         }

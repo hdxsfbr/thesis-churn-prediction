@@ -12,7 +12,9 @@ from sklearn.frozen import FrozenEstimator
 from sklearn.metrics import roc_auc_score
 
 from churn.contract.loader import contract_for
+from churn.contract.views import contract_ctes
 from churn.features.registry import FEATURE_COLUMNS
+from churn.model.archetype import fit_archetype, load_labels
 from churn.model.dataset import build_dataset
 from churn.model.registry import ModelError, register
 from churn.settings import Settings
@@ -49,6 +51,35 @@ def fit(df: pd.DataFrame, settings: Settings):
     return model, metrics
 
 
+def weak_labelled_churners(wh: Warehouse, settings: Settings, contract) -> dict[str, str]:
+    """subscriber_key -> archetype for voluntary churners whose reason code or tickets map to one (A3)."""
+    labels = load_labels()
+    ctes = contract_ctes(contract, settings.key_pepper, ["subscriptions"])
+    reasons = wh.query(
+        f"WITH {ctes} SELECT subscriber_key, cancel_reason_code FROM subscriptions WHERE cancel_type = 'voluntary'"
+    )
+    tickets: dict[str, list[str]] = {}
+    if "support_tickets" in contract.views:
+        ctes = contract_ctes(contract, settings.key_pepper, ["support_tickets"])
+        t = wh.query(f"WITH {ctes} SELECT subscriber_key, category FROM support_tickets WHERE category IS NOT NULL")
+        for key, category in zip(t["subscriber_key"], t["category"], strict=True):
+            tickets.setdefault(key, []).append(category)
+    out = {}
+    for key, reason in zip(reasons["subscriber_key"], reasons["cancel_reason_code"], strict=True):
+        label = labels.label(reason, tickets.get(key, ()))
+        if label:
+            out[key] = label
+    return out
+
+
+def fit_archetypes(df: pd.DataFrame, weak: dict[str, str], settings: Settings):
+    """Archetype classifier on churned snapshots (label = 1) that have a weak label; None when too few."""
+    churned = df[df["label"] == 1]
+    y = churned["subscriber_key"].map(weak).dropna()
+    model = fit_archetype(churned.loc[y.index, FEATURE_COLUMNS], y, settings.model.seed)
+    return model, {"archetype_rows": len(y), "archetype_trained": model is not None}
+
+
 def train(wh: Warehouse, settings: Settings, train_end: date | None = None) -> str:
     """Build snapshots, fit, register and promote. Returns the model version."""
     train_end = train_end or settings.synth.end_date
@@ -57,12 +88,14 @@ def train(wh: Warehouse, settings: Settings, train_end: date | None = None) -> s
     if df.empty:
         raise ModelError("no training snapshots; run `churn synth` first")
     model, metrics = fit(df, settings)
+    archetype_model, archetype_metrics = fit_archetypes(df, weak_labelled_churners(wh, settings, contract), settings)
+    metrics.update(archetype_metrics)
 
     fingerprint = hashlib.sha256(
         pd.util.hash_pandas_object(df[["snapshot_date", "label", *FEATURE_COLUMNS]], index=False).values.tobytes()
     ).hexdigest()[:8]
     version = f"lgbm-{train_end:%Y%m%d}-{fingerprint}"
-    bundle = {"model": model, "features": list(FEATURE_COLUMNS), "version": version}
+    bundle = {"model": model, "features": list(FEATURE_COLUMNS), "version": version, "archetype": archetype_model}
     metrics["positive_rate"] = round(float(df["label"].mean()), 4)
     return register(
         wh, settings, bundle, version,
