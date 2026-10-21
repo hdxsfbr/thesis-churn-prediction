@@ -28,6 +28,7 @@ def test_replaying_run_creates_no_duplicate_outbox_rows(pipeline):
     assert out2["outbox_id"].is_unique
     assert out1.equals(out2)  # insert-only: first write wins, created_at untouched
     assert log1.equals(log2)
-    assert again.dispatched == len(out1)
+    assert again.dispatched == len(out2)  # only rows written to the outbox count; gated ones are `queued`
+    assert again.queued == again.decided - again.dispatched
     total = wh.query("SELECT COUNT(*) AS n, COUNT(DISTINCT outbox_id) AS d FROM CHURN_OPS.OUTBOX").iloc[0]
     assert total["n"] == total["d"]
