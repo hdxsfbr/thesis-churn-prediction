@@ -10,12 +10,14 @@
 WITH {{contract_ctes}},
 active AS (
     -- One row per subscriber (the most recently started active subscription), so RISK_SCORES keeps
-    -- its (run_id, subscriber_key) key. Status is only used to decide who is active: the source holds
-    -- today's status only, so status-derived features would leak the label until subscription_events.
+    -- its (run_id, subscriber_key) key. The source holds today's status only, so status is used to decide
+    -- who is active and for status_past_due, which is NULL unless :use_current_status (the live run) is set.
+    -- status_paused never reads status: it comes from the pause/resume events (last_pause_state).
     SELECT b.subscriber_key,
            b.subscription_id,
            b.started_at,
            b.price_usd,
+           b.status,
            b.interval_days,
            b.tenure_days,
            LEAST(60, b.tenure_days) AS recent60_len,
@@ -29,6 +31,7 @@ active AS (
                subscription_id,
                started_at,
                price_usd,
+               status,
                interval_days,
                DATEDIFF(day, started_at, {{as_of}}) AS tenure_days
         FROM subscriptions
@@ -55,6 +58,7 @@ SELECT a.subscriber_key,
        o.discount_365 / NULLIF(o.gross_365, 0) AS discount_share_365,
        COALESCE(o.refund_count_365, 0) AS refund_count_365,
        COALESCE(o.refund_amount_365, 0) AS refund_amount_365,
+       o.avg_amount_recent90 - o.avg_amount_prior90 AS price_change_90,
        CASE WHEN a.recent60_len > 0 AND a.prior60_len > 0
             THEN 60.0 * (COALESCE(o.orders_recent60, 0) / CAST(a.recent60_len AS DOUBLE)
                          - COALESCE(o.orders_prior60, 0) / CAST(a.prior60_len AS DOUBLE))
@@ -80,6 +84,10 @@ SELECT a.subscriber_key,
                          - COALESCE(s.switches_prior90, 0) / CAST(a.prior90_len AS DOUBLE))
        END AS blend_switch_rate_change,
        COALESCE(s.pauses_180, 0) AS pause_events_180,
+       COALESCE(p.is_paused, 0) AS status_paused,
+       CASE WHEN CAST(:use_current_status AS BOOLEAN)
+            THEN CASE WHEN a.status = 'PAST_DUE' THEN 1 ELSE 0 END
+       END AS status_past_due,
        -- email
        CASE WHEN COALESCE(e.n_events, 0) > 0 THEN 1 ELSE 0 END AS has_email,
        COALESCE(e.unsubscribed, 0) AS email_unsubscribed,
@@ -98,7 +106,7 @@ SELECT a.subscriber_key,
        COALESCE(t.tickets_90, 0) AS tickets_90,
        COALESCE(t.escalated_90, 0) AS escalated_tickets_90,
        t.sentiment_30 - t.sentiment_31_90 AS ticket_sentiment_delta_30_90,
-       COALESCE(t.tickets_30, 0) + 2 * COALESCE(t.escalated_90, 0)
+       (COALESCE(t.tickets_30, 0) - COALESCE(t.tickets_90, 0) / 3.0) + 2 * COALESCE(t.escalated_90, 0)
            - COALESCE(t.sentiment_30 - t.sentiment_31_90, 0) AS ticket_escalation_score,
        -- quiz
        CASE WHEN COALESCE(q.n_sessions, 0) > 0 THEN 1 ELSE 0 END AS has_quiz,
@@ -112,6 +120,7 @@ SELECT a.subscriber_key,
 FROM active a
 LEFT JOIN order_agg o ON o.subscriber_key = a.subscriber_key
 LEFT JOIN sub_event_agg s ON s.subscriber_key = a.subscriber_key
+LEFT JOIN last_pause_state p ON p.subscriber_key = a.subscriber_key
 LEFT JOIN email_agg e ON e.subscriber_key = a.subscriber_key
 LEFT JOIN ticket_agg t ON t.subscriber_key = a.subscriber_key
 LEFT JOIN quiz_agg q ON q.subscriber_key = a.subscriber_key

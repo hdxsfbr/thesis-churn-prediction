@@ -73,15 +73,54 @@ def test_skip_count_trend(feats):
 
 
 def test_ticket_escalation_score(feats):
-    # tickets_30 = 2, escalated_90 = 2, sentiment delta = avg(-0.5, -0.1) - avg(0.2, 0.4, 0.0) = -0.5
-    # score = tickets_30 + 2 * escalated_90 - sentiment_delta = 2 + 4 + 0.5
+    # tickets_30 = 2, tickets_90 = 5, escalated_90 = 2, sentiment delta = avg(-0.5, -0.1) - avg(0.2, 0.4, 0.0) = -0.5
+    # score = (tickets_30 - tickets_90 / 3) + 2 * escalated_90 - sentiment_delta = (2 - 5/3) + 4 + 0.5
     assert val(feats, "alpha", "tickets_30") == 2
     assert val(feats, "alpha", "tickets_90") == 5
     assert val(feats, "alpha", "escalated_tickets_90") == 2
     assert val(feats, "alpha", "ticket_sentiment_delta_30_90") == pytest.approx(-0.5)
-    assert val(feats, "alpha", "ticket_escalation_score") == pytest.approx(6.5)
+    assert val(feats, "alpha", "ticket_escalation_score") == pytest.approx(2 - 5 / 3 + 4 + 0.5)
     assert val(feats, "no_tickets", "ticket_escalation_score") == 0
 
+
+def test_price_change_90(feats):
+    assert val(feats, "repriced", "price_change_90") == pytest.approx(40.0 - 25.0)
+
+
+def test_price_change_90_null_when_a_window_has_no_orders(feats):
+    assert math.isnan(val(feats, "single_order", "price_change_90"))  # nothing in days 91-180
+    assert math.isnan(val(feats, "no_data", "price_change_90"))
+    assert math.isnan(val(feats, "new", "price_change_90"))
+
+
+def test_status_paused_follows_latest_pause_or_resume_event(feats):
+    assert val(feats, "paused", "status_paused") == 1
+    assert val(feats, "alpha", "status_paused") == 1  # a pause and no later resume
+    assert val(feats, "resumed", "status_paused") == 0  # pause then resume
+    assert val(feats, "no_data", "status_paused") == 0  # no events
+
+
+def test_status_paused_never_reads_subscription_status(settings):
+    wh = DuckDBWarehouse(":memory:")
+    contract = fx.load(wh)
+    wh.execute(f"UPDATE {fx.SCHEMA}.subscriptions SET status = 'PAUSED' WHERE subscription_id = 's_resumed'")
+    df = build_features(wh, settings, contract, fx.AS_OF).set_index("subscription_id")
+    assert val(df, "resumed", "status_paused") == 0
+    wh.close()
+
+
+def test_status_past_due_is_null_by_default(feats):
+    assert feats["status_past_due"].isna().all()
+
+
+def test_status_past_due_with_current_status(settings):
+    wh = DuckDBWarehouse(":memory:")
+    contract = fx.load(wh)
+    df = build_features(wh, settings, contract, fx.AS_OF, current_status=True).set_index("subscription_id")
+    assert val(df, "past_due", "status_past_due") == 1
+    assert val(df, "alpha", "status_past_due") == 0
+    assert df["status_past_due"].notna().all()
+    wh.close()
 
 def test_days_since_last_quiz(feats):
     assert val(feats, "alpha", "days_since_last_quiz") == 40

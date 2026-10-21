@@ -73,9 +73,16 @@ def render_feature_sql(settings: Settings, contract: Contract, name: str = "subs
     )
 
 
-def build_features(wh: Warehouse, settings: Settings, contract: Contract, as_of: date | datetime) -> pd.DataFrame:
+def build_features(
+    wh: Warehouse, settings: Settings, contract: Contract, as_of: date | datetime, current_status: bool = False
+) -> pd.DataFrame:
+    """Features for every subscriber active at as_of.
+
+    ``current_status`` (bound as ``:use_current_status``) enables ``status_past_due``, which reads today's
+    ``subscriptions.status``. Pass True only for the live run date; the default NULLs it so history never leaks.
+    """
     sql = render_feature_sql(settings, contract)
-    df = wh.query(sql, {"as_of": as_of_ts(as_of)})
+    df = wh.query(sql, {"as_of": as_of_ts(as_of), "use_current_status": bool(current_status)})
     out = df[KEY_COLUMNS + FEATURE_COLUMNS].copy()
     out[FEATURE_COLUMNS] = out[FEATURE_COLUMNS].apply(pd.to_numeric, errors="coerce").astype(float)
     return out

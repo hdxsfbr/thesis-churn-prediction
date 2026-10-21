@@ -18,7 +18,7 @@ class Feature:
     missing: str  # policy when the source has no data
     # Label template for explanations: "{value}" is replaced by the formatted value.
     label: str = ""
-    # number | days | usd | ratio | share | orders | refunds | count | points | slope | score | flag
+    # number | days | usd | usd_delta | ratio | share | orders | refunds | count | points | slope | score | flag
     unit: str = "number"
     windows: tuple[int, ...] = ()  # look-back windows in days (a trend lists both compared windows)
     trend: bool = False  # compares two windows or fits a slope
@@ -55,6 +55,10 @@ FEATURES: tuple[Feature, ...] = (
       "min(tenure, 60)", "NULL when there is no prior window yet (tenure <= 60 days)",
       "Order pace changed by {value} per 60 days versus the prior 60 days", "slope", windows=(60, 60),
       trend=True),
+    F("price_change_90", "orders",
+      "Average order amount (USD) in the last 90 days minus the average in days 91 to 180",
+      "NULL when either window has no orders", "Average order value changed by {value} versus days 91 to 180",
+      "usd_delta", windows=(90, 180), trend=True),
     # --- subscription events ---
     F("has_subscription_events", "subscription_events", "1 if any subscription event exists before as_of",
       "never missing", "Subscription activity on record: {value}", "flag"),
@@ -81,6 +85,14 @@ FEATURES: tuple[Feature, ...] = (
       trend=True, leading_indicator=True),
     F("pause_events_180", "subscription_events", "Pauses in the 180 days before as_of", "0",
       "{value} in the last 180 days", "count", windows=(180,)),
+    F("status_paused", "subscription_events",
+      "1 if the latest pause/resume event before as_of is a pause (never reads subscriptions.status)",
+      "0 when there are no pause or resume events", "Currently paused: {value}", "flag"),
+    F("status_past_due", "subscription",
+      "1 if subscriptions.status is PAST_DUE, 0 otherwise; computed only at the live run date, because the "
+      "source holds today's status only",
+      "NULL in history (training snapshots and backfills), 0/1 only in the live run",
+      "Payment is past due: {value}", "flag"),
     # --- email ---
     F("has_email", "email", "1 if any email event exists before as_of", "never missing",
       "Email history on record: {value}", "flag"),
@@ -113,7 +125,8 @@ FEATURES: tuple[Feature, ...] = (
       "NULL when either window has no scored ticket",
       "Ticket sentiment changed by {value} versus days 31 to 90", "slope", windows=(30, 90), trend=True),
     F("ticket_escalation_score", "support",
-      "tickets_30 + 2 * escalated_tickets_90 - ticket_sentiment_delta_30_90 (a missing delta counts as 0)",
+      "(tickets_30 - tickets_90 / 3) + 2 * escalated_tickets_90 - ticket_sentiment_delta_30_90 (a missing delta "
+      "counts as 0); tickets_90 / 3 is the 30-day pace implied by the 90-day count",
       "0 when there are no tickets",
       "Support escalation score is {value}", "score", windows=(30, 90), trend=True, leading_indicator=True),
     # --- quiz ---
@@ -151,6 +164,8 @@ def format_value(feature: Feature, value: float) -> str:
         return f"{value:.1f}×"
     if feature.unit == "share":
         return f"{value * 100:.0f}%"
+    if feature.unit == "usd_delta":
+        return f"{'-' if value < 0 else '+'}${abs(value):,.2f}"
     if feature.unit == "points":
         return f"{value * 100:+.0f} points"
     if feature.unit == "slope":
@@ -198,8 +213,9 @@ def render_features_md() -> str:
         "A row is visible only if its event time is before `as_of` and it was loaded on or before `as_of` "
         "(no leakage, R2.3)."),
         "",
-        ("Missing data (R2.4): counts default to 0; rates, deltas and recencies stay NULL; each domain has a "
-        "`has_<domain>` indicator. LightGBM reads NULLs natively, so no subscriber errors out."),
+        ("Missing data (R2.4): counts default to 0; rates, deltas and recencies stay NULL; every domain except "
+        "orders (always mapped by the contract) has a `has_<domain>` indicator. LightGBM reads NULLs natively, "
+        "so no subscriber errors out."),
         "",
         ("Tenure truncation: windows of brand-new subscribers are truncated to their tenure. A recent window "
         "is `min(tenure, w)` days long and the prior window is `min(w, max(tenure - w, 0))` days long; "

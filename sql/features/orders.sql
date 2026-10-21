@@ -15,6 +15,9 @@ order_agg AS (
            SUM(CASE WHEN ordered_at >= DATEADD(day, -60, {{as_of}}) THEN 1 ELSE 0 END) AS orders_recent60,
            SUM(CASE WHEN ordered_at >= DATEADD(day, -120, {{as_of}})
                      AND ordered_at < DATEADD(day, -60, {{as_of}}) THEN 1 ELSE 0 END) AS orders_prior60,
+           AVG(CASE WHEN ordered_at >= DATEADD(day, -90, {{as_of}}) THEN amount_usd END) AS avg_amount_recent90,
+           AVG(CASE WHEN ordered_at >= DATEADD(day, -180, {{as_of}})
+                     AND ordered_at < DATEADD(day, -90, {{as_of}}) THEN amount_usd END) AS avg_amount_prior90,
            MAX(ordered_at) AS last_order_at,
            SUM(CASE WHEN ordered_at >= DATEADD(day, -365, {{as_of}}) THEN discount_usd ELSE 0 END) AS discount_365,
            SUM(CASE WHEN ordered_at >= DATEADD(day, -365, {{as_of}}) THEN amount_usd ELSE 0 END) AS gross_365,

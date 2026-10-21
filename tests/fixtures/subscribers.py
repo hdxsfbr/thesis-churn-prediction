@@ -29,6 +29,10 @@ SUBS = {
         "partial",  # NULLs in non-key columns
         "short_tenure",  # tenure 30 days (n = 4 whole weeks)
         "no_data",  # subscription only
+        "paused",  # latest pause/resume event is a pause
+        "resumed",  # pause, then resume
+        "past_due",  # subscriptions.status = PAST_DUE today
+        "repriced",  # order amounts 50/30 in the last 90 days, 20/30 in days 91-180
     )
 }
 EDGE_CASES = ["no_quiz", "no_email", "no_tickets", "single_order", "new", "partial"]
@@ -272,6 +276,18 @@ def load(wh) -> Contract:
     r.quiz("partial", "qzp", ago(100), answers=1)
 
     r.sub("no_data", 120)
+
+    r.sub("paused", 100)
+    r.sub_event("paused", "pause", ago(30))
+    r.sub("resumed", 100)
+    r.sub_event("resumed", "pause", ago(40))
+    r.sub_event("resumed", "resume", ago(10))
+    r.sub("past_due", 100, status="PAST_DUE")
+
+    # avg amount last 90 days = (50 + 30) / 2 = 40; days 91-180 = (20 + 30) / 2 = 25; days 181+ is ignored
+    r.sub("repriced", 300)
+    for d, amount in ((10, 50.0), (40, 30.0), (100, 20.0), (120, 30.0), (200, 99.0)):
+        r.order("repriced", ago(d), amount=amount)
 
     # never active at AS_OF
     r.sub("cancelled", 300, status="CANCELLED", cancelled_at=ago(10))

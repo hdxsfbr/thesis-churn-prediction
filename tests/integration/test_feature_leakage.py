@@ -47,7 +47,21 @@ def test_post_as_of_events_do_not_change_features(settings):
         fx.add_row(wh, "quiz_responses", answer_id=f"l_a_{name}", customer_id=cust, quiz_session_id=f"l_q_{name}",
                    question_key="q0", answer_value="y", answered_at=fx.ago(1), recommended_sku="s", loaded_at=late)
 
+    # status_paused: a resume after as_of must not un-pause, a pause after as_of must not pause
+    # (a late-loaded resume is invisible too); price_change_90 ignores the post-as_of order above
+    fx.add_row(wh, "subscription_events", subscription_id=fx.SUBS["paused"], event_id="x_resume",
+               event_type="resume", event_ts=after_ts, loaded_at=after_ts)
+    fx.add_row(wh, "subscription_events", subscription_id=fx.SUBS["paused"], event_id="l_resume",
+               event_type="resume", event_ts=fx.ago(1), loaded_at=late)
+    fx.add_row(wh, "subscription_events", subscription_id=fx.SUBS["resumed"], event_id="x_pause",
+               event_type="pause", event_ts=after_ts, loaded_at=after_ts)
+    fx.add_row(wh, "orders", order_id="x_o_repriced", customer_id="c_repriced", ordered_at=after_ts,
+               amount_usd=500.0, discount_usd=0.0, refund_usd=None, refunded_at=None, loaded_at=after_ts)
+    fx.add_row(wh, "orders", order_id="l_o_repriced", customer_id="c_repriced", ordered_at=fx.ago(1),
+               amount_usd=500.0, discount_usd=0.0, refund_usd=None, refunded_at=None, loaded_at=late)
+
     after = build_features(wh, settings, contract, fx.AS_OF)
+    assert after.set_index("subscription_id").loc[fx.SUBS["paused"], "status_paused"] == 1
     pd.testing.assert_frame_equal(before, after)
 
     # sanity: moving as_of past the new rows does change something

@@ -25,4 +25,12 @@ sub_event_agg AS (
                AS pauses_180
     FROM visible_sub_events
     GROUP BY subscriber_key
+),
+-- status_paused: the latest pause/resume event before as_of decides; subscriptions.status is never read
+last_pause_state AS (
+    SELECT subscriber_key, CASE WHEN event_type = 'pause' THEN 1 ELSE 0 END AS is_paused
+    FROM visible_sub_events
+    WHERE event_type IN ('pause', 'resume')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY subscriber_key
+                               ORDER BY event_ts DESC, CASE WHEN event_type = 'pause' THEN 0 ELSE 1 END DESC) = 1
 )

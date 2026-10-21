@@ -4,7 +4,7 @@
 
 All features are computed per active subscriber for one `as_of` date by the SQL in `sql/features/`. A row is visible only if its event time is before `as_of` and it was loaded on or before `as_of` (no leakage, R2.3).
 
-Missing data (R2.4): counts default to 0; rates, deltas and recencies stay NULL; each domain has a `has_<domain>` indicator. LightGBM reads NULLs natively, so no subscriber errors out.
+Missing data (R2.4): counts default to 0; rates, deltas and recencies stay NULL; every domain except orders (always mapped by the contract) has a `has_<domain>` indicator. LightGBM reads NULLs natively, so no subscriber errors out.
 
 Tenure truncation: windows of brand-new subscribers are truncated to their tenure. A recent window is `min(tenure, w)` days long and the prior window is `min(w, max(tenure - w, 0))` days long; trends are normalised by those lengths and are NULL when the prior window is empty. `email_click_slope_90` is truncated the same way, in whole weeks: n = min(13, floor(tenure_days / 7)), fitted over `[as_of - 7n days, as_of)` with week index w = 0..n-1 (oldest to newest), slope = SUM((w - (n-1)/2) * clicks_w) / (n * (n*n - 1) / 12); it is NULL when n < 2 or there are no email events in those n weeks.
 
@@ -17,6 +17,7 @@ Leading indicators (ARCHITECTURE 6.2) are marked **leading**.
 | `tenure_days` | point in time | Days since the subscription started | never missing |  |
 | `price_usd` | point in time | Subscription price per shipment | never missing |  |
 | `interval_days` | point in time | Days between shipments | never missing |  |
+| `status_past_due` | point in time | 1 if subscriptions.status is PAST_DUE, 0 otherwise; computed only at the live run date, because the source holds today's status only | NULL in history (training snapshots and backfills), 0/1 only in the live run |  |
 
 ## orders
 
@@ -31,6 +32,7 @@ Leading indicators (ARCHITECTURE 6.2) are marked **leading**.
 | `refund_count_365` | 365 d | Refunded orders in the 365 days | 0 |  |
 | `refund_amount_365` | 365 d | Refunded amount in the 365 days | 0 |  |
 | `orders_trend_60` | last 60 d vs prior 60 d | Orders per 60 days in the recent 60 days minus the prior 60 days, each window normalised by min(tenure, 60) | NULL when there is no prior window yet (tenure <= 60 days) | trend |
+| `price_change_90` | last 90 d vs days 91-180 | Average order amount (USD) in the last 90 days minus the average in days 91 to 180 | NULL when either window has no orders | trend |
 
 ## subscription_events
 
@@ -44,6 +46,7 @@ Leading indicators (ARCHITECTURE 6.2) are marked **leading**.
 | `blend_switch_count_365` | 365 d | Blend switches in the 365 days before as_of | 0 |  |
 | `blend_switch_rate_change` | last 90 d vs prior 90 d | Blend switches per 90 days in the recent 90 days minus the prior 90 days, each window normalised by min(tenure, 90) | NULL when there is no prior window yet (tenure <= 90 days) | **leading** trend |
 | `pause_events_180` | 180 d | Pauses in the 180 days before as_of | 0 |  |
+| `status_paused` | point in time | 1 if the latest pause/resume event before as_of is a pause (never reads subscriptions.status) | 0 when there are no pause or resume events |  |
 
 ## email
 
@@ -64,7 +67,7 @@ Leading indicators (ARCHITECTURE 6.2) are marked **leading**.
 | `tickets_90` | 90 d | Tickets opened in the last 90 days | 0 |  |
 | `escalated_tickets_90` | 90 d | Escalated tickets in the last 90 days | 0 |  |
 | `ticket_sentiment_delta_30_90` | last 30 d vs days 31-90 | Average ticket sentiment over the last 30 days minus the average over days 31 to 90 | NULL when either window has no scored ticket | trend |
-| `ticket_escalation_score` | last 30 d vs days 31-90 | tickets_30 + 2 * escalated_tickets_90 - ticket_sentiment_delta_30_90 (a missing delta counts as 0) | 0 when there are no tickets | **leading** trend |
+| `ticket_escalation_score` | last 30 d vs days 31-90 | (tickets_30 - tickets_90 / 3) + 2 * escalated_tickets_90 - ticket_sentiment_delta_30_90 (a missing delta counts as 0); tickets_90 / 3 is the 30-day pace implied by the 90-day count | 0 when there are no tickets | **leading** trend |
 
 ## quiz
 
