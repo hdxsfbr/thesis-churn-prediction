@@ -1,13 +1,15 @@
-"""`churn` command line: migrate, synth, train, cycle."""
+"""`churn` command line: migrate, synth, train, evaluate, cycle."""
 
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from churn import runtime_config
+from churn.model.registry import ModelError
 from churn.model.train import train as train_model
 from churn.orchestration.runner import RunFailed, run_cycle
 from churn.settings import Settings
@@ -58,6 +60,27 @@ def train(as_of: datetime | None = typer.Option(None, formats=["%Y-%m-%d"], help
     settings, wh = _open()
     version = train_model(wh, settings, as_of.date() if as_of else None)
     typer.echo(f"promoted model {version}")
+
+
+@app.command()
+def evaluate(
+    scale: str | None = typer.Option(
+        None, help="Synthetic scale of the warehouse population, to judge archetypes (skipped when omitted)"
+    ),
+    docs_dir: Path | None = typer.Option(None, help="Where to write eval-report.md and model-card.md (default docs/)"),
+) -> None:
+    """Score the 3-month time holdout; write EVAL_REPORTS, docs/eval-report.md and docs/model-card.md."""
+    from churn.model.evaluate import evaluate as run_evaluation
+
+    settings, wh = _open()
+    try:
+        result = run_evaluation(wh, settings, docs_dir=docs_dir, scale=scale)
+    except ModelError as exc:
+        typer.echo(f"evaluation FAILED: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    for t in result.targets:
+        line = f"{t.requirement} {t.name}: {t.status} (measured {t.value:.3f}, target > {t.target:.2f})"
+        typer.echo(line + (f" - {t.reason}" if t.reason else ""))
 
 
 @app.command()
