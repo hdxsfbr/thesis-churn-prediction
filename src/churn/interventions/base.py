@@ -39,6 +39,10 @@ class InterventionType(ABC):
     def action(self, context: AgentContext) -> Action:
         """Concrete parameters for this subscriber."""
 
+    def cost_usd(self, context: AgentContext) -> float:
+        """Expected cost of this action in USD (used by the gate and the policy)."""
+        return 0.0
+
     @abstractmethod
     def template(self, context: AgentContext) -> Content:
         """Deterministic template content (fallback and thin-path content)."""

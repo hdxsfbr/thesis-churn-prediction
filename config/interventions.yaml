@@ -2,3 +2,6 @@
 # Adding a type = implement it in a new module and list it here.
 interventions:
   - churn.interventions.checkin_email.CheckinEmail
+  - churn.interventions.formulation.Formulation
+  - churn.interventions.retention_offer.RetentionOffer
+  - churn.interventions.escalation.Escalation
