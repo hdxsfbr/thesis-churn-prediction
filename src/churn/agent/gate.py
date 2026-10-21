@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from churn.agent.cycle import Decision
 
 HUMAN_QUEUE = "human_queue"
+DEFAULT_GRACE_H = 24.0  # used only when the guardrails section is unavailable
 DEFAULT_EXPIRY_H = 72.0  # ARCHITECTURE A6; used only when the guardrails section is unavailable
 
 
@@ -26,6 +27,7 @@ class GateResult:
     reasons: list[str] = field(default_factory=list)
     cost_usd: float = 0.0
     expiry_h: float = DEFAULT_EXPIRY_H
+    grace_h: float = DEFAULT_GRACE_H
 
     @property
     def text(self) -> str:
@@ -43,9 +45,10 @@ def cost_of(decision: Decision) -> float:
 def evaluate(decision: Decision, cfg: RuntimeConfig) -> GateResult:
     cost = cost_of(decision)
     expiry = cfg.guardrails.approval_expiry_h if cfg.guardrails else DEFAULT_EXPIRY_H
+    grace = cfg.guardrails.approval_grace_h if cfg.guardrails else DEFAULT_GRACE_H
     gate = cfg.gate
     if cfg.gate_mode == "approve_all" or gate is None:
-        return GateResult(True, ["approve_all: gate config invalid"], cost, expiry)
+        return GateResult(True, ["approve_all: gate config invalid"], cost, expiry, grace)
     reasons: list[str] = []
     if decision.intervention.name in gate.always_approve:
         reasons.append(f"always_approve: {decision.intervention.name}")
@@ -57,7 +60,7 @@ def evaluate(decision: Decision, cfg: RuntimeConfig) -> GateResult:
         discount = decision.action.discount_pct
         if discount is not None and discount >= gate.t_discount_pct:
             reasons.append(f"discount {discount:g}% >= {gate.t_discount_pct}%")
-    return GateResult(bool(reasons), reasons, cost, expiry)
+    return GateResult(bool(reasons), reasons, cost, expiry, grace)
 
 
 def apply_gate(decisions: list[Decision], cfg: RuntimeConfig) -> list[Decision]:

@@ -131,15 +131,50 @@ def test_expired_after_expiry_no_outbox(env):
     expired, answered_late, fresh = rows.iloc[0]["decision_id"], rows.iloc[1]["decision_id"], rows.iloc[2]["decision_id"]
     process(wh, settings, now=datetime.now() + timedelta(hours=71))  # before the deadline: nothing expires
     assert log_of(wh, expired)["approval_status"] == "PENDING"
-    edit(wh, answered_late, decision="APPROVED", decided_at=datetime.now())  # answered after the deadline
-    late = datetime.now() + timedelta(hours=73)  # time moves forward; the rows are not touched
-    process(wh, settings, now=late)
+    edit(wh, answered_late, decision="APPROVED", decided_at=datetime.now())  # answered, but only processed late
+    process(wh, settings, now=datetime.now() + timedelta(hours=97))  # past deadline + 24 h grace
     for did in (expired, answered_late):
         assert outbox_count(wh, did) == 0
         assert log_of(wh, did)["approval_status"] == "EXPIRED"
         assert "EXPIRED" in events(wh, did)
     assert approvals(wh, "t-appr-exp-1").set_index("decision_id").loc[expired]["processed_status"] == "EXPIRED"
     assert log_of(wh, fresh)["approval_status"] == "EXPIRED"  # unanswered rows expire too
+
+
+def test_unanswered_rows_expire_at_deadline_without_grace(env):
+    wh, settings = env
+    rows, _ = pending(env, "t-appr-exp-73")
+    process(wh, settings, now=datetime.now() + timedelta(hours=73))
+    assert all(log_of(wh, d)["approval_status"] == "EXPIRED" for d in rows["decision_id"])
+
+
+def test_approved_shortly_before_deadline_and_processed_within_grace_gets_one_outbox_row(env):
+    wh, settings = env
+    rows, _ = pending(env, "t-appr-grace-1")
+    did = rows.iloc[0]["decision_id"]
+    deadline = pd.Timestamp(log_of(wh, did)["approval_expires_at"]).to_pydatetime()
+    edit(wh, did, decision="APPROVED", decided_by="ana@thesis.example", decided_at=deadline - timedelta(hours=2))
+    process(wh, settings, now=deadline + timedelta(hours=22))
+    process(wh, settings, now=deadline + timedelta(hours=23))  # replay adds nothing
+    assert outbox_count(wh, did) == 1
+    assert log_of(wh, did)["approval_status"] == "APPROVED"
+    # An unanswered row from the same run has expired by then.
+    assert log_of(wh, rows.iloc[1]["decision_id"])["approval_status"] == "EXPIRED"
+
+
+def test_grace_is_pinned_at_dispatch_and_config_edits_do_not_change_it(env):
+    wh, settings = env
+    rows, _ = pending(env, "t-appr-grace-pin")
+    did = rows.iloc[0]["decision_id"]
+    log = log_of(wh, did)
+    assert pd.Timestamp(log["approval_grace_until"]) - pd.Timestamp(log["approval_expires_at"]) == pd.Timedelta(hours=24)
+    cfg = {"contact_cap_14d": 1, "contact_cap_90d": 3, "max_discount_pct": 25, "offer_catalogue": ["FREE_SHIPPING"],
+           "approval_expiry_h": 72, "approval_grace_h": 0}
+    wh.execute("UPDATE CHURN_OPS.AGENT_CONFIG SET value_json = :v WHERE key = 'guardrails'", {"v": json.dumps(cfg)})
+    deadline = pd.Timestamp(log["approval_expires_at"]).to_pydatetime()
+    edit(wh, did, decision="APPROVED")
+    process(wh, settings, now=deadline + timedelta(hours=10))
+    assert outbox_count(wh, did) == 1
 
 
 def test_edited_expiry_and_backdated_decision_cannot_defeat_deadline(env):
@@ -150,7 +185,7 @@ def test_edited_expiry_and_backdated_decision_cannot_defeat_deadline(env):
     edit(wh, ids[0], expires_at=far, decision="APPROVED")
     # Backdated decided_at (before the real deadline) plus a pushed expiry.
     edit(wh, ids[1], expires_at=far, decision="APPROVED", decided_at=datetime.now() - timedelta(hours=1))
-    process(wh, settings, now=datetime.now() + timedelta(hours=100))
+    process(wh, settings, now=datetime.now() + timedelta(hours=100))  # past deadline (72 h) + grace (24 h)
     for did in ids:
         assert outbox_count(wh, did) == 0
         assert log_of(wh, did)["approval_status"] == "EXPIRED"

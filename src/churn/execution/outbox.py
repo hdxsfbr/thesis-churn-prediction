@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from churn.execution.approvals import STALE_REASON, approval_row, inactive_subscribers
+from churn.execution.approvals import STALE_REASON, approval_row, grace_until, inactive_subscribers
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
 
@@ -36,10 +36,14 @@ def dispatch(wh: Warehouse, settings: Settings, decisions: list[Decision]) -> in
         for d in decisions
     ])
     # The approval deadline is kept on the audit log, which the approver cannot edit (the APPROVALS copy is not trusted).
-    log["approval_expires_at"] = [approval_row(d, now)["expires_at"] if d.needs_approval else None for d in decisions]
+    queued = [approval_row(d, now) for d in decisions if d.needs_approval]
+    gated = [d for d in decisions if d.needs_approval]
+    expires = {r["decision_id"]: r["expires_at"] for r in queued}
+    graces = {d.decision_id: grace_until(d, now) for d in gated}
+    log["approval_expires_at"] = [expires.get(d.decision_id) for d in decisions]
+    log["approval_grace_until"] = [graces.get(d.decision_id) for d in decisions]
     with wh.transaction():
         wh.merge_frame(f"{ops}.INTERVENTION_LOG", log, keys=["decision_id"], insert_only=True)
-        queued = [approval_row(d, now) for d in decisions if d.needs_approval]
         if queued:
             wh.merge_frame(f"{ops}.APPROVALS", pd.DataFrame(queued), keys=["decision_id"], insert_only=True)
         if send:

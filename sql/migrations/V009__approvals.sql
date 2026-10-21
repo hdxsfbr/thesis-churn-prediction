@@ -37,6 +37,8 @@ ALTER TABLE CHURN_OPS.INTERVENTION_LOG ADD COLUMN IF NOT EXISTS decided_by VARCH
 ALTER TABLE CHURN_OPS.INTERVENTION_LOG ADD COLUMN IF NOT EXISTS approval_note VARCHAR;
 -- Trusted copy of the approval deadline (APPROVALS.expires_at is approver-editable and ignored by the agent).
 ALTER TABLE CHURN_OPS.INTERVENTION_LOG ADD COLUMN IF NOT EXISTS approval_expires_at TIMESTAMP_NTZ;
+-- Trusted end of the grace period (deadline + guardrails.approval_grace_h), pinned at dispatch.
+ALTER TABLE CHURN_OPS.INTERVENTION_LOG ADD COLUMN IF NOT EXISTS approval_grace_until TIMESTAMP_NTZ;
 
 -- Decisions sent to approval in this run, next to dispatched (rows written to the outbox).
 ALTER TABLE CHURN_OPS.RUNS ADD COLUMN IF NOT EXISTS queued BIGINT;

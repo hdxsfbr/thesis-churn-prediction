@@ -1,12 +1,16 @@
 """Approvals: the CHURN_OPS.APPROVALS queue and its lifecycle (R5.1-R5.4, ARCHITECTURE 6.5).
 
-``queue_rows`` builds the rows the gate sends to approval. ``process`` runs at the start of each agent step and
+``approval_row`` builds the rows the gate sends to approval. ``process`` runs at the start of each agent step and
 acts on the approver's edits. The agent trusts only ``decision``, ``decided_by`` and ``note`` from the row (and
 ``decided_at`` only for the audit trail); the action is checked against the payload hash kept in INTERVENTION_LOG.
 
 The approval deadline is read from INTERVENTION_LOG.approval_expires_at, never from APPROVALS.expires_at (which the
 approver can edit). Expiry is judged against the processing time ``now`` only: an approver-supplied ``decided_at``
-cannot defeat it. Known limitation: an answer given in time but processed after the deadline counts as EXPIRED.
+cannot defeat it. PENDING rows (and rows holding an invalid value) expire when ``now >= deadline``. Rows already
+answered APPROVED or REJECTED are honoured while ``now < approval_grace_until`` (deadline + ``guardrails.approval_grace_h``,
+24 h by default) and become EXPIRED after that, so an approval given shortly before the deadline is still acted on in
+the next cycle (R5.3). The grace end is pinned in INTERVENTION_LOG.approval_grace_until at dispatch, so a later config
+edit cannot change it; a missing value falls back to the deadline plus 24 h.
 
 Eligibility re-check at execution: the subscriber must still be active in the source. Contact caps and email
 unsubscribes are not enforced yet because the guardrail work that defines them is a separate ticket.
@@ -23,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
+from churn.agent.gate import DEFAULT_GRACE_H
 from churn.contract.loader import contract_for
 from churn.contract.views import contract_ctes
 from churn.settings import Settings
@@ -84,6 +89,11 @@ def approval_row(decision: Decision, created_at: datetime) -> dict:
     }
 
 
+def grace_until(decision: Decision, created_at: datetime) -> datetime:
+    """End of the grace period for answered rows: the deadline plus the grace pinned in the gate result."""
+    return created_at + timedelta(hours=decision.gate.expiry_h + decision.gate.grace_h)
+
+
 def inactive_subscribers(wh: Warehouse, settings: Settings, keys: list[str], now: datetime) -> set[str]:
     """Which of ``keys`` are not active in the source right now (cancelled, or no subscription at all)."""
     if not keys:
@@ -122,7 +132,7 @@ def process(wh: Warehouse, settings: Settings, now: datetime | None = None) -> C
         return counts
     rows.columns = [c.lower() for c in rows.columns]
     logs = wh.query(
-        f"SELECT decision_id, payload_hash, approval_expires_at, guardrail_events FROM {ops}.INTERVENTION_LOG "
+        f"SELECT decision_id, payload_hash, approval_expires_at, approval_grace_until, guardrail_events FROM {ops}.INTERVENTION_LOG "
         f"WHERE decision_id IN (SELECT decision_id FROM {ops}.APPROVALS)"
     )
     logs.columns = [c.lower() for c in logs.columns]
@@ -168,8 +178,10 @@ def process(wh: Warehouse, settings: Settings, now: datetime | None = None) -> C
                 continue
             expires_at = _ts(log.approval_expires_at)  # trusted copy
             expired = expires_at is not None and now >= expires_at
+            grace_end = _ts(log.approval_grace_until) or (
+                expires_at + timedelta(hours=DEFAULT_GRACE_H) if expires_at is not None else None)
             if decision in ("APPROVED", "REJECTED"):
-                if expired:
+                if grace_end is not None and now >= grace_end:
                     finish(r, "EXPIRED", decision, "EXPIRED", "NOT_DISPATCHED")
                 elif decision == "REJECTED":
                     finish(r, "REJECTED", decision, "REJECTED", "NOT_DISPATCHED")

@@ -21,6 +21,7 @@ guardrails:
   max_discount_pct: 25
   offer_catalogue: [FREE_SHIPPING, PCT_10_NEXT, PCT_20_NEXT, PCT_25_NEXT_2, FREE_SAMPLE_BLEND]
   approval_expiry_h: 72
+  approval_grace_h: 24
 
 holdout:
   share: 0.10

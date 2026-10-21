@@ -33,11 +33,12 @@ Built on `main` today (requirements traces in
 | T6 | Top explaining factors (TreeSHAP) on every score |
 | T7 | Archetype, confidence and low-confidence flag on scores |
 | T10 | Agent thin path: at-risk subscribers get a check-in email row in `OUTBOX` and `INTERVENTION_LOG` |
+| T14 | Threshold gate and approval table: decisions above the risk/cost/discount thresholds go to `CHURN_OPS.APPROVALS` instead of the outbox. Approver edits are processed at the start of each cycle. Subscribers who cancelled since scoring are not sent anything |
 
 Wave 2's synthetic data generator (T2) is also in the code, but it has no ticket trace yet.
 
 Planned and **not built yet**: the evaluation report, error taxonomy and structured logging, the other three
-intervention types, the approval gate and approval table, the Thompson-sampling policy, the Snowflake backend
+intervention types, the Thompson-sampling policy, the Snowflake backend
 and bootstrap, guardrails, LLM-written content, outcomes and feedback loops, the API service, the worker and
 deployment. See `WAVES.md` for the order. Only DuckDB is implemented as a warehouse backend today.
 
@@ -57,7 +58,8 @@ Package layout under `src/churn/`:
 - `model/`: dataset, training and calibration, scoring, explanations (`explain.py`), archetype classifier
   (`archetype.py`) and model registry.
 - `agent/`, `interventions/`, `execution/`: decision step (returns decisions, never writes), the intervention
-  registry loaded from `config/interventions.yaml`, and the outbox writer.
+  registry loaded from `config/interventions.yaml`, the threshold gate (`agent/gate.py`), the outbox writer and
+  the approval lifecycle (`execution/approvals.py`).
 - `orchestration/runner.py`: the daily cycle.
 - `warehouse/`: warehouse protocol, DuckDB implementation, bulk and MERGE writes, and the migration runner.
 - `cli.py`: the `churn` command.
@@ -142,9 +144,19 @@ Thesis's real views means editing this file only. Format, validation and logical
 
 **Runtime defaults / AGENT_CONFIG**: `config/runtime_defaults.yaml` holds the seed values for
 `CHURN_OPS.AGENT_CONFIG`: risk tier boundaries (medium 0.20, high 0.45, critical 0.70) and which tiers count as
-at-risk, plus approval gate, guardrail, holdout and outcome keys. Today the tier keys drive the cycle; the other
-keys are seeded for later tickets. After `churn bootstrap` the table is the source of truth. Each run pins a
+at-risk, plus approval gate, guardrail, holdout and outcome keys. Today the tier keys, the `gate` thresholds
+(`t_risk`, `t_cost_usd`, `t_discount_pct`, `always_approve`) and `guardrails.approval_expiry_h` drive the cycle.
+The other keys are seeded for later tickets. If the `gate` section is missing or invalid, every decision goes to
+approval. After `churn bootstrap` the table is the source of truth. Each run pins a
 snapshot of it, so a change takes effect on the next run.
+
+**Approving interventions**: pending rows in `CHURN_OPS.APPROVALS` have `decision = 'PENDING'`. To answer one, set
+`decision` to `APPROVED` or `REJECTED`, and optionally fill in `decided_by`, `decided_at` and `note`. The next cycle acts on it.
+An approved row gets exactly one `OUTBOX` row, after the agent checks that the subscriber is still active. The
+agent ignores edits to any other column, and a changed proposal (subject, body, offer, discount) counts as
+`TAMPERED` and is rejected. An invalid value is logged and the row stays pending. Edits after processing are
+logged as `LATE_EDIT` and ignored. Unanswered rows expire after `approval_expiry_h` (72 h by default). The outcome
+is copied into `INTERVENTION_LOG` (`approval_status`, `decided_by`, `approval_note`, `guardrail_events`).
 
 Other config files: `config/archetype_labels.yaml` (weak labels for the archetype classifier) and
 `config/interventions.yaml` (enabled intervention types, currently the check-in email).
