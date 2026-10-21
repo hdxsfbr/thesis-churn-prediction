@@ -1,0 +1,4 @@
+# Enabled intervention types (R8.5): dotted paths to InterventionType subclasses.
+# Adding a type = implement it in a new module and list it here.
+interventions:
+  - churn.interventions.checkin_email.CheckinEmail
