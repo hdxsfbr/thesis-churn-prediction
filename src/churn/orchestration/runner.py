@@ -11,9 +11,11 @@ from datetime import date, datetime
 
 import pandas as pd
 
+from churn.agent.cycle import run_agent
 from churn.contract.loader import contract_for
 from churn.contract.validate import validate
 from churn.contract.views import populate_key_map
+from churn.execution.outbox import dispatch
 from churn.features.builder import as_of_ts, build_features, count_active
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
@@ -38,6 +40,9 @@ class RunResult:
     scored: int
     gate_mode: str = "normal"
     agent_halted: bool = False
+    at_risk: int = 0
+    decided: int = 0
+    dispatched: int = 0
 
 
 def default_run_id(as_of: date | datetime, kind: str = "scheduled") -> str:
@@ -63,12 +68,14 @@ def run_cycle(
     base = {"run_id": run_id, "kind": kind, "as_of": as_of_dt, "started_at": started}
     _write_run(wh, ops, **base, status="RUNNING", model_version=None, active_in_source=None,
                scored=None, ended_at=None, duration_s=None, error_msg=None,
-               config_snapshot_id=None, error_class=None)
+               config_snapshot_id=None, error_class=None,
+               at_risk=None, decided=None, dispatched=None)  # clear counts of an earlier run with this id
 
     active: int | None = None
     scored: int | None = None
     version: str | None = None
     cfg: RuntimeConfig | None = None
+    at_risk = decided = dispatched = 0
     try:
         cfg = load_pinned(wh, settings, run_id)  # pins CONFIG_SNAPSHOTS(run_id); a rerun reuses it
         contract = contract_for(settings)
@@ -90,13 +97,29 @@ def run_cycle(
             # scores while RUNS says FAILED. Resolve with checkpoint/pinning work.
             if scored != active:  # rolls the scores back
                 raise RunFailed(f"scored {scored} subscribers but {active} are active in the source", scored)
+
+        # Decide and dispatch. Skipped when the agent is halted (invalid tiers/guardrails) or the gate is in
+        # approve_all mode (nothing may reach the outbox without approval; the gate arrives in T14).
+        # The at-risk count is the coverage denominator, so it is counted whether or not the agent runs.
+        # With invalid tiers (cfg.tiers is None) there is no at-risk definition: it stays 0.
+        if cfg.tiers is not None:
+            marks = ", ".join(f":t{i}" for i, _ in enumerate(cfg.tiers.at_risk_tiers()))
+            params = {"r": run_id, **{f"t{i}": t for i, t in enumerate(cfg.tiers.at_risk_tiers())}}
+            at_risk = int(wh.query(
+                f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r AND tier IN ({marks})", params
+            ).iloc[0]["n"])
+        if not cfg.agent_halt and cfg.gate_mode == "normal":
+            decisions = run_agent(wh, settings, run_id, cfg)
+            decided = len(decisions)
+            dispatched = dispatch(wh, settings, decisions)
     except Exception as exc:
         if isinstance(exc, RunFailed) and exc.scored is not None:
             scored = exc.scored
         _write_run(wh, ops, **base, status="FAILED", model_version=version, active_in_source=active,
                    scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
                    error_msg=f"{type(exc).__name__}: {exc}", config_snapshot_id=run_id if cfg else None,
-                   error_class=type(exc).__name__)
+                   error_class=type(exc).__name__,
+                   at_risk=at_risk, decided=decided, dispatched=dispatched)
         if isinstance(exc, RunFailed):
             raise
         raise RunFailed(f"{type(exc).__name__}: {exc}") from exc
@@ -106,5 +129,7 @@ def run_cycle(
     _write_run(wh, ops, **base, status=status, model_version=version, active_in_source=active,
                scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
                error_msg="ConfigError: " + "; ".join(cfg.errors) if cfg.degraded else None,
-               config_snapshot_id=run_id, error_class="ConfigError" if cfg.degraded else None)
-    return RunResult(run_id, status, as_of_dt, version, active, scored, cfg.gate_mode, cfg.agent_halt)
+               config_snapshot_id=run_id, error_class="ConfigError" if cfg.degraded else None,
+               at_risk=at_risk, decided=decided, dispatched=dispatched)
+    return RunResult(run_id, status, as_of_dt, version, active, scored, cfg.gate_mode, cfg.agent_halt,
+                     at_risk, decided, dispatched)
