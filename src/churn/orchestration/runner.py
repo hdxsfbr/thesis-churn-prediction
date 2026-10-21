@@ -19,6 +19,8 @@ from churn.execution.outbox import dispatch
 from churn.features.builder import as_of_ts, build_features, count_active
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
+from churn.obs.errors import classify, runbook_hint
+from churn.obs.logging import get_logger
 from churn.runtime_config import RuntimeConfig, load_pinned
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
@@ -49,6 +51,30 @@ def default_run_id(as_of: date | datetime, kind: str = "scheduled") -> str:
     return f"{kind}-{as_of_ts(as_of):%Y%m%d}"
 
 
+class _Steps:
+    """Logs step start/end/failure and remembers the current step for failure classification."""
+
+    def __init__(self, log) -> None:
+        self.log = log
+        self.current: str | None = None
+
+    def __call__(self, name: str):
+        steps = self
+
+        class _Ctx:
+            def __enter__(self_inner):
+                steps.current = name
+                steps.log.info("step_start", step=name)
+                self_inner.t0 = time.monotonic()
+
+            def __exit__(self_inner, *exc):
+                if exc[0] is None:
+                    steps.log.info("step_end", step=name, duration_s=round(time.monotonic() - self_inner.t0, 3))
+                return False
+
+        return _Ctx()
+
+
 def _write_run(wh: Warehouse, ops: str, **fields) -> None:
     wh.merge_frame(f"{ops}.RUNS", pd.DataFrame([fields]), keys=["run_id"])
 
@@ -71,22 +97,36 @@ def run_cycle(
                config_snapshot_id=None, error_class=None,
                at_risk=None, decided=None, dispatched=None)  # clear counts of an earlier run with this id
 
+    log = get_logger("runner", run_id=run_id)
+    step = _Steps(log)
+    log.info("run_start", kind=kind, as_of=as_of_dt.isoformat())
     active: int | None = None
     scored: int | None = None
     version: str | None = None
     cfg: RuntimeConfig | None = None
     at_risk = decided = dispatched = 0
     try:
-        cfg = load_pinned(wh, settings, run_id)  # pins CONFIG_SNAPSHOTS(run_id); a rerun reuses it
-        contract = contract_for(settings)
-        validate(wh, contract)
-        version, _ = load_promoted(wh, settings)
-        active = count_active(wh, settings, contract, as_of_dt)
-        features = build_features(wh, settings, contract, as_of_dt, current_status=True)
-        frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
+        with step("config"):
+            cfg = load_pinned(wh, settings, run_id)  # pins CONFIG_SNAPSHOTS(run_id); a rerun reuses it
+        with step("contract"):
+            contract = contract_for(settings)
+            validate(wh, contract)
+        with step("model"):
+            version, _ = load_promoted(wh, settings)
+        with step("count_active"):
+            active = count_active(wh, settings, contract, as_of_dt)
+        if active == 0:
+            log.warning("zero_active_subscribers", step="count_active", as_of=as_of_dt.isoformat())
+            with step("write_scores"):
+                wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
+            scored = 0
+            return _finish(wh, ops, base, t0, log, cfg, version, active, scored, 0, 0, 0)
+        with step("features"):
+            features = build_features(wh, settings, contract, as_of_dt, current_status=True)
+        with step("score"):
+            frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
 
-
-        with wh.transaction():
+        with step("write_scores"), wh.transaction():
             populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)
             wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
             wh.merge_frame(f"{ops}.RISK_SCORES", frame, keys=["run_id", "subscriber_key"])
@@ -103,33 +143,43 @@ def run_cycle(
         # The at-risk count is the coverage denominator, so it is counted whether or not the agent runs.
         # With invalid tiers (cfg.tiers is None) there is no at-risk definition: it stays 0.
         if cfg.tiers is not None:
-            marks = ", ".join(f":t{i}" for i, _ in enumerate(cfg.tiers.at_risk_tiers()))
-            params = {"r": run_id, **{f"t{i}": t for i, t in enumerate(cfg.tiers.at_risk_tiers())}}
-            at_risk = int(wh.query(
-                f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r AND tier IN ({marks})", params
-            ).iloc[0]["n"])
+            with step("reconcile"):
+                marks = ", ".join(f":t{i}" for i, _ in enumerate(cfg.tiers.at_risk_tiers()))
+                params = {"r": run_id, **{f"t{i}": t for i, t in enumerate(cfg.tiers.at_risk_tiers())}}
+                at_risk = int(wh.query(
+                    f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r AND tier IN ({marks})", params
+                ).iloc[0]["n"])
         if not cfg.agent_halt and cfg.gate_mode == "normal":
-            decisions = run_agent(wh, settings, run_id, cfg)
-            decided = len(decisions)
-            dispatched = dispatch(wh, settings, decisions)
+            with step("agent"):
+                decisions = run_agent(wh, settings, run_id, cfg)
+                decided = len(decisions)
+                dispatched = dispatch(wh, settings, decisions)
     except Exception as exc:
+        error_class = classify(exc)
+        hint = runbook_hint(error_class) if error_class == "ModelError" else None
+        log.error("step_failed", step=step.current, error_class=error_class, error_msg=str(exc))
         if isinstance(exc, RunFailed) and exc.scored is not None:
             scored = exc.scored
         _write_run(wh, ops, **base, status="FAILED", model_version=version, active_in_source=active,
                    scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
-                   error_msg=f"{type(exc).__name__}: {exc}", config_snapshot_id=run_id if cfg else None,
-                   error_class=type(exc).__name__,
+                   error_msg=f"{type(exc).__name__}: {exc}" + (f" ({hint})" if hint else ""),
+                   config_snapshot_id=run_id if cfg else None, error_class=error_class,
                    at_risk=at_risk, decided=decided, dispatched=dispatched)
         if isinstance(exc, RunFailed):
             raise
-        raise RunFailed(f"{type(exc).__name__}: {exc}") from exc
+        raise RunFailed(f"{type(exc).__name__}: {exc}" + (f" ({hint})" if hint else "")) from exc
 
+    return _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched)
+
+
+def _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched) -> RunResult:
     # Invalid gate thresholds -> approve_all; invalid tiers/guardrails -> agent halts. Either way DEGRADED.
     status = "DEGRADED" if cfg.degraded else "SUCCEEDED"
     _write_run(wh, ops, **base, status=status, model_version=version, active_in_source=active,
                scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
                error_msg="ConfigError: " + "; ".join(cfg.errors) if cfg.degraded else None,
-               config_snapshot_id=run_id, error_class="ConfigError" if cfg.degraded else None,
+               config_snapshot_id=base["run_id"], error_class="ConfigError" if cfg.degraded else None,
                at_risk=at_risk, decided=decided, dispatched=dispatched)
-    return RunResult(run_id, status, as_of_dt, version, active, scored, cfg.gate_mode, cfg.agent_halt,
+    log.info("run_end", status=status, scored=scored, active_in_source=active)
+    return RunResult(base["run_id"], status, base["as_of"], version, active, scored, cfg.gate_mode, cfg.agent_halt,
                      at_risk, decided, dispatched)
