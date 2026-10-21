@@ -244,7 +244,7 @@ Leakage (R2.3): all SQL is parameterised on `:as_of`, and the test appends post-
 Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score row, features (engagement and tenure), intervention history, holdout group and config, then:
 
 1. **Holdout**: control-group members get a `HOLDOUT` decision row (logged, no action) and are excluded from the coverage denominator (R6.6).
-2. **Eligibility and guardrails** (`guardrails.py`, R4.6): each registered intervention type declares `channel`, `cost(context)` and `eligible(context)`. Global guardrails remove arms:
+2. **Eligibility and guardrails** (`guardrails.py`, R4.6): each registered intervention type declares `channel`, `cost_usd(context)` (expected cost in USD; the base class defaults to 0) and `eligible(context)`. Global guardrails remove arms:
    - contact cap (1/14d, 3/90d, counted from `INTERVENTION_LOG` dispatched and pending rows),
    - email unsubscribed (blocks email-channel arms; escalation stays available),
    - an active offer already outstanding (blocks offers),
