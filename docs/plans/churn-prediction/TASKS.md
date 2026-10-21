@@ -2,6 +2,13 @@
 
 Inputs: `docs/plans/churn-prediction/PRD.md` (requirements R1–R9) and `docs/plans/churn-prediction/ARCHITECTURE.md` (design and defaults A1–A12). Waves come later, in `WAVES.md`.
 
+**Revision 2 (2026-10-21, change request during wave 5).** What changed in this file:
+- **T2** is marked *Superseded by T29*. It was merged as MR !5, but its code is no longer on main. Its slice, files and tests stay below for reference, and T29 is the spec that gets built.
+- **T8** (in progress, MR !18): the slice and acceptance tests are amended for the new R3.6 targets. The label stays A1. The new targets are top-2% precision > 0.50, top-decile lift ≥ 4× and pre-cancellation recall > 0.60 at a boundary chosen on a validation split. The ceiling arithmetic is in ARCHITECTURE A1. The files are unchanged.
+- **T29** (new) rebuilds T2's full synthetic source on current main, reconciled with T7's interim `latent_archetypes()`. It uses migrations `synth/V003` and `V015` instead of V002, and maps all eight contract views (R1.6, R1.7).
+- **T30** (new) reruns the T8 evaluation on the full synthetic data with every view mapped, and regenerates the eval report and model card (R3.8).
+- The coverage and shared-files tables are updated. No other ticket changes.
+
 Conventions for every ticket:
 - Each ticket is a thin end-to-end slice: data (migration or synthetic data), logic, interface (CLI step, runner step, API or document) and the tests that prove it.
 - All tests run with `python -m pytest` from the repo root with no network and no Snowflake credentials (DuckDB backend and `FakeLLM`). The exceptions are tests marked `slow`, `scale` or `snowflake`.
@@ -64,6 +71,8 @@ Conventions for every ticket:
 ---
 
 ## T2 — Full synthetic source: all domains, latent archetypes, edge cases, data profile
+
+**Status: Superseded by T29 (Revision 2).** This ticket was merged as MR !5, but a later commit removed its code from main, so it is no longer there. It is not rebuilt under this id. T29 rebuilds this slice on current main, and the text below is kept only as T29's reference spec.
 
 **Slice:** extend the generator into the latent-state simulator (ARCHITECTURE §5.2). It covers all eight contract views (subscription_events, products, email_events, support_tickets, quiz_responses, customers_pii, plus the T1 views), noisy cancellation reason codes drawn from a latent archetype, independent involuntary churn, and injected edge cases (no quiz, no email, no tickets, single order, tenure < 30 d, nulls, duplicates, late-arriving rows, timezone offsets). `churn synth --profile` writes `docs/data-profile.md` and `CHURN_OPS.DATA_PROFILE`.
 
@@ -245,7 +254,22 @@ Conventions for every ticket:
 
 ## T8 — Model evaluation report and model card with honest target check
 
-**Slice:** `churn evaluate` scores the 3-month time holdout with the A1 label. It computes top-decile precision, pre-cancellation recall, PR-AUC/ROC-AUC, calibration, and per-archetype precision/recall plus a confusion matrix against the latent archetype. It writes `EVAL_REPORTS`, `docs/eval-report.md` and `docs/model-card.md`. Each R3.6 target is printed as PASS, or as MISS with a stated reason.
+**Amended in Revision 2** (in progress, MR !18). The label is unchanged (A1, 30-day voluntary churn), and so are the files.
+
+**Slice:**
+- `churn evaluate` splits the monthly snapshots by date into training, a 3-month validation split and the 3-month holdout, and purges snapshots whose label window crosses into the next split (ARCHITECTURE A1, §6.3).
+- It fits an evaluation-only model on the training split with `train.fit()`. This model is never registered.
+- It chooses the at-risk boundary on the validation split only: the highest threshold with validation recall ≥ 0.65, and no boundary when there are fewer than 20 validation churners.
+- On the holdout it computes:
+  - the base rate b;
+  - top-2% precision, top-decile precision and top-decile lift;
+  - pre-cancellation recall at the boundary, and the precision at the boundary, with counts;
+  - PR-AUC/ROC-AUC and calibration;
+  - per-archetype precision/recall and a confusion matrix against the latent archetype;
+  - the ceilings min(1, b/0.10) and min(1, b/0.02), computed from the measured b.
+- It writes `EVAL_REPORTS`, `docs/eval-report.md` and `docs/model-card.md`.
+- Each R3.6 target is printed as PASS, or as MISS with a stated reason: top-2% precision > 0.50, top-decile lift ≥ 4×, pre-cancellation recall > 0.60.
+- The report labels the boundary "recommended" and never writes it to `AGENT_CONFIG`. The report records the scale and row counts, explains why the 0.70 top-decile target was replaced, and keeps the notes that synthetic accuracy is not real-world accuracy and that the 90-day impact target can only be checked after go-live.
 
 **Files:**
 - `src/churn/model/evaluate.py`
@@ -257,12 +281,20 @@ Conventions for every ticket:
 - `tests/integration/test_eval_report.py`
 
 **Acceptance tests:**
-- `test_evaluate_metrics.py::test_top_decile_precision_known_value`
+- `test_evaluate_metrics.py::test_top_share_precision_known_value`: top-2% precision on a hand-built frame.
+- `test_evaluate_metrics.py::test_top_decile_lift_known_value`
 - `test_evaluate_metrics.py::test_pre_cancellation_recall_uses_last_score_before_cancel`
+- `test_evaluate_metrics.py::test_boundary_is_highest_threshold_with_validation_recall_at_least_065`
+- `test_evaluate_metrics.py::test_boundary_ignores_holdout_data`
+- `test_evaluate_metrics.py::test_too_few_validation_churners_is_recall_miss_with_reason`
+- `test_evaluate_metrics.py::test_ceilings_from_measured_base_rate`
+- `test_evaluate_metrics.py::test_splits_are_disjoint_ordered_and_purged`
 - `test_evaluate_metrics.py::test_missed_target_reported_as_miss_with_reason`
-- `test_eval_report.py::test_report_states_label_window_and_holdout`
+- `test_eval_report.py::test_report_states_label_window_validation_and_holdout`
 - `test_eval_report.py::test_report_has_per_archetype_precision`
-- `test_eval_report.py::test_targets_on_medium_synth` (marked slow): asserts precision > 70% and recall > 60%, or xfails with the stated reason.
+- `test_eval_report.py::test_report_shows_counts_ceiling_and_recommended_boundary`
+- `test_eval_report.py::test_evaluate_does_not_write_agent_config`
+- `test_eval_report.py::test_targets_on_medium_synth` (marked slow): asserts top-2% precision > 0.50, top-decile lift ≥ 4× and pre-cancellation recall > 0.60, or xfails with the stated reason.
 
 **Covers:** R3.6, R3.3 (evaluation), R9.2 (model card).
 
@@ -848,23 +880,105 @@ Conventions for every ticket:
 
 ---
 
+## T29 — Rebuild the full synthetic source on main and map every contract view (supersedes T2)
+
+**Slice:**
+- Rebuild T2's slice (T2 above is the spec) on top of current main.
+  - Check first that T2's files are absent from main and that T7's interim `latent.py` / `latent_archetypes()` is present.
+  - Keep the `latent_archetypes(settings, scale)` interface and T7's RNG streams, so each customer's latent archetype is unchanged (ARCHITECTURE §5.2, as-built note).
+  - Replace the interim emission model with one per-archetype model that drives all eight contract views (subscription_events, products, email_events, support_tickets, quiz_responses, customers_pii, plus subscriptions and orders).
+  - Add a `THESIS_SYNTH.latent_truth` table, noisy reason codes and ticket categories, an independent involuntary-churn hazard and injected edge cases.
+- `churn synth --profile` writes `docs/data-profile.md` and `CHURN_OPS.DATA_PROFILE`.
+- `config/source_contract.yaml` maps all eight views for the synthetic schema using T4's column names. `customers_pii` gets `pii: true`, so it is validated but never rendered.
+- The migrations take the next free numbers. MR !5 already used V002, so these are `sql/synth/V003` and `sql/migrations/V015`, re-checked on main before use.
+- The ticket re-checks T7's `test_archetype_beats_chance_on_latent_truth` at its unchanged 0.25 threshold. If it fails, the generator is tuned, not the test.
+
+**Files:**
+- `config/source_contract.yaml`
+- `sql/synth/V003__synth_all_domains.sql`
+- `sql/migrations/V015__data_profile.sql`
+- `src/churn/synth/generator.py`
+- `src/churn/synth/latent.py`
+- `src/churn/synth/edge_cases.py`
+- `src/churn/synth/profile.py`
+- `src/churn/contract/loader.py`
+- `src/churn/contract/views.py`
+- `src/churn/cli.py`
+- `docs/data-profile.md`
+- `docs/data-contract.md`
+- `tests/unit/test_synth_latent.py`
+- `tests/unit/test_synth_import_boundary.py`
+- `tests/integration/test_synth_profile.py`
+- `tests/unit/test_contract_pii.py`
+- `tests/integration/test_contract_all_views.py`
+- `tests/integration/test_contract_swap.py`
+- `docs/plans/churn-prediction/tickets/T29.md`
+
+**Acceptance tests:**
+- `test_synth_profile.py::test_every_domain_has_view`: each R1.1 domain has at least one populated contract view.
+- `test_synth_profile.py::test_edge_case_shares_above_zero`: the profile shows a share above 0% for every edge-case category.
+- `test_synth_profile.py::test_churn_events_span_label_and_eval_window`: voluntary cancellations cover the 30-day horizon plus the 3-month validation and 3-month holdout.
+- `test_synth_latent.py::test_deterministic_for_seed`: the same seed gives identical output.
+- `test_synth_latent.py::test_reason_codes_follow_latent_archetype_with_noise`: about 25% noise.
+- `test_synth_latent.py::test_latent_truth_table_matches_latent_archetypes`: `latent_truth` equals `latent_archetypes(settings, scale)`, and each customer's archetype is unchanged from the interim model for the same seed.
+- `test_synth_import_boundary.py::test_synth_does_not_import_features_or_model`
+- `test_contract_all_views.py::test_all_eight_views_mapped_and_validate`: the contract maps exactly the eight views, and `contract.validate` passes on synthetic data.
+- `test_contract_all_views.py::test_no_stub_cte_used_with_default_contract`
+- `test_contract_all_views.py::test_every_feature_domain_populated_on_synthetic_data`: every registry `has_<domain>` feature is 1 for at least one subscriber, and `orders_total > 0` for at least one.
+- `test_contract_pii.py::test_pii_view_never_rendered`: neither the feature SQL nor the key-map SQL contains `customers_pii`, and `view_cte` on it raises `ContractError`.
+- `test_contract_swap.py::test_second_schema_by_config_only`: still passes with every mapped view copied to the second schema; the assertion is unchanged.
+- `test_archetype_scoring.py::test_archetype_beats_chance_on_latent_truth`: re-run unchanged (threshold 0.25) against the full model and passes.
+- The full suite and ruff pass, and no migration number is reused.
+
+**Covers:** R1.1, R1.2 (content; full scale in T27), R1.6, R1.7.
+
+---
+
+## T30 — Re-evaluate on the full synthetic data and regenerate the eval report and model card
+
+**Slice:**
+- Check first that main contains T8 and T29.
+- Extend `model/evaluate.py` additively with a data-provenance section: the mapped contract views (all eight), the synth scale and seed, the snapshot and holdout row counts, and a feature-domain coverage table (the share of holdout rows with each `has_<domain> = 1` and with `orders_total > 0`).
+- Regenerate the synthetic data with every view mapped, at T8's scale or larger and at least `small`, and rerun `churn evaluate`.
+- Commit the regenerated `docs/eval-report.md` and `docs/model-card.md`. Every R3.6 target is PASS, or MISS with its reason (D9).
+
+**Files:**
+- `src/churn/model/evaluate.py`
+- `docs/eval-report.md`
+- `docs/model-card.md`
+- `tests/integration/test_eval_full_source.py`
+- `docs/plans/churn-prediction/tickets/T30.md`
+
+**Acceptance tests:**
+- `test_eval_full_source.py::test_report_states_full_source_all_eight_views`: the provenance section lists the eight mapped views and the scale.
+- `test_eval_full_source.py::test_domain_coverage_every_domain_populated`: every `has_<domain>` share and the orders share are above 0.
+- `test_eval_full_source.py::test_committed_report_has_every_r3_6_line`: the committed report has top-2% precision, top-decile lift, recall and precision at the validation-chosen boundary, the ceiling section and a PASS/MISS line per target. Its holdout row count is at least T8's, as recorded in `tickets/T30.md`.
+- The committed `docs/model-card.md` keeps the notes that synthetic accuracy is not real-world accuracy and that the 90-day impact target can only be checked after go-live.
+
+**Covers:** R3.8, R3.6 (on the full data).
+
+---
+
 ## Requirement coverage
 
 | Req | Tickets |
 |---|---|
-| R1.1 | T2 |
-| R1.2 | T2, T27 |
+| R1.1 | T29 (supersedes T2) |
+| R1.2 | T29 (supersedes T2), T27 |
 | R1.3 | T3 |
 | R1.4 | T3, T23 |
 | R1.5 | T24, T25 |
+| R1.6 | T29 |
+| R1.7 | T29 |
 | R2.1–R2.4 | T4 |
 | R3.1 | T1 |
 | R3.2 | T6 |
 | R3.3 | T7, T8 |
 | R3.4 | T5 |
 | R3.5 | T1 |
-| R3.6 | T8 |
+| R3.6 | T8 (amended), T30 |
 | R3.7 | T10, T22 |
+| R3.8 | T30 |
 | R4.1 | T10, T11 |
 | R4.2 | T13 |
 | R4.3 | T11 |
@@ -896,18 +1010,22 @@ Conventions for every ticket:
 | File | Tickets |
 |---|---|
 | `src/churn/orchestration/runner.py` | T1, T3, T5, T9, T10, T16, T17, T19, T20 |
-| `src/churn/cli.py` | T1, T2, T5, T8, T16, T18, T21, T22, T24, T27, T28 |
+| `src/churn/cli.py` | T1, T2, T5, T8, T16, T18, T21, T22, T24, T27, T28, T29 |
 | `src/churn/agent/cycle.py` | T10, T12, T13, T14, T16, T20 |
 | `src/churn/model/score.py` | T1, T5, T6, T7 |
 | `src/churn/features/registry.py` | T1, T4, T6, T18 |
 | `pyproject.toml` | T1, T9, T15, T21, T22, T24 |
 | `config/settings.yaml` | T1, T15, T22 |
-| `config/source_contract.yaml` | T1, T2 |
+| `config/source_contract.yaml` | T1, T2, T29 |
 | `config/interventions.yaml` | T10, T11 |
 | `config/runtime_defaults.yaml` | T5, T13 |
 | `src/churn/agent/content.py` | T10, T11, T15 |
-| `src/churn/synth/generator.py`, `src/churn/synth/latent.py` | T1, T2 (generator also T27) |
-| `src/churn/contract/views.py`, `src/churn/contract/loader.py` | T1, T3 |
+| `src/churn/synth/generator.py`, `src/churn/synth/latent.py` | T1, T2, T29 (generator also T27) |
+| `src/churn/contract/views.py`, `src/churn/contract/loader.py` | T1, T3, T29 |
+| `tests/integration/test_contract_swap.py` | T3, T29 |
+| `docs/data-contract.md` | T3, T29 |
+| `src/churn/model/evaluate.py`, `docs/eval-report.md`, `docs/model-card.md` | T8, T30 |
+| `synth/edge_cases.py`, `synth/profile.py`, `docs/data-profile.md`, T2's three test files | T2, T29 |
 | `src/churn/settings.py` | T1, T3 |
 | `src/churn/model/train.py` | T1, T7 |
 | `src/churn/model/registry.py`, `src/churn/model/dataset.py` | T1, T18 |

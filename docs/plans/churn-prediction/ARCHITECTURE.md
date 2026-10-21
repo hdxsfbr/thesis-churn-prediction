@@ -4,6 +4,19 @@ Inputs: `docs/PRD.md` (Thesis brief, source of truth), `docs/plans/churn-predict
 
 The repository is greenfield (README, two PRDs, nothing else), so every path below is new. Wherever a convention is ours to pick, the design uses the most common Python 3.12 one (src layout, `pyproject.toml`, pytest) and says so.
 
+**Revision 2 (2026-10-21, change request during wave 5).** These edits cover PRD Revision 2 (D4–D9, R1.6, R1.7, R3.6 rewritten, R3.8):
+- A1: label kept, ceiling arithmetic, training/validation/holdout split.
+- §2.1: Revision 2 Scout gaps.
+- §4.2: all eight views mapped, and `customers_pii` flagged `pii`.
+- §5.2: the full generator rebuilt on main and reconciled with T7's interim latent model.
+- §5.3: DATA_PROFILE and the migration numbering rule.
+- §6.3: evaluation metrics and the validation-chosen boundary.
+- §8: new failure cases.
+- §10: coverage rows for R1.6, R1.7, R3.6 and R3.8.
+- §12, plus the new §13: the ticket plan (T2 superseded by T29, T8 amended, T30 re-evaluation, wave placement).
+
+Everything else is unchanged.
+
 ---
 
 ## 1. Design in one paragraph
@@ -37,7 +50,7 @@ The PRD left OQ1–OQ10 open. None of them blocks the design, because each one b
 
 | # | Open point | Decision (default, configurable) | Why |
 |---|---|---|---|
-| A1 (OQ1) | Churn label & window | Positive = **voluntary** cancellation with effective date in `(as_of, as_of + 30d]`. Involuntary cancellations (payment failure / dunning end) are excluded from the positive label and reported separately. Skips and pauses are features, not churn. Evaluation = time-based holdout on the **last 3 months** of snapshots. Keys: `label.horizon_days=30`, `label.include_involuntary=false`, `eval.holdout_months=3`. | Monthly churn is the brief's business metric. Interventions cannot rescue involuntary churn. |
+| A1 (OQ1, D4) | Churn label & window | Positive = **voluntary** cancellation with effective date in `(as_of, as_of + 30d]`. Involuntary cancellations (payment failure / dunning end) are excluded from the positive label and reported separately. Skips and pauses are features, not churn. **The label is unchanged in Revision 2 (D4).** Evaluation is a time-ordered split of the monthly snapshots. **Holdout** = the last 3 snapshot months. **Validation** = the 3 snapshot months before the holdout, used only to choose the evaluation at-risk boundary (D5, D7). **Training** = everything earlier. A snapshot is dropped from its split when its 30-day label window reaches the first snapshot of the next split (purge). Label key: `label.horizon_days=30` (settings.yaml). The evaluation constants (`HOLDOUT_MONTHS=3`, `VALIDATION_MONTHS=3`) live in `model/evaluate.py`, following T7's precedent of module constants. **Ceiling arithmetic (Revision 2):** let *b* be the holdout base rate. A perfect model's top decile holds at most all churners, so top-decile precision ≤ min(1, b / 0.10) and lift ≤ min(10, 1 / b). On the synthetic data b ≈ 0.031, so the ceiling is 0.031 / 0.10 = **0.31** (10× lift). The brief's ">0.70 top-decile precision" therefore cannot be met under this label. T8 (MR !18) measured 0.17 precision and 0.40 recall at the fixed 0.20 boundary and reported an honest MISS. Replacement targets (R3.6): top-2% precision > 0.50 (ceiling min(1, b / 0.02) = 1.0 at b = 0.031, reachable only when b > 0.01); top-decile lift ≥ 4× (a top-decile precision of about 0.124 at b = 0.031, reachable while b ≤ 0.25); pre-cancellation recall > 0.60 at the validation-chosen boundary. The report computes these ceilings from the measured *b*, never from the 3.1% quoted here. | Monthly churn is the brief's business metric. Interventions cannot rescue involuntary churn. Keeping the label and changing the targets (D4) leaves every merged ticket's label code unchanged. |
 | A2 (OQ2) | Active subscriber | Scored population = status in `{ACTIVE, PAUSED, PAST_DUE}` (`scoring.active_statuses`). Paused and past-due add a status feature and are often high-risk. | Paused subscribers are the ones most worth reaching. Excluding them would hide churn. |
 | A3 (OQ3) | Archetype ground truth | **Weak labels** from structured signals present in real Thesis data: cancellation reason codes plus support ticket categories (mapping in `config/archetype_labels.yaml`). A multinomial classifier trained on features of churned subscribers predicts the archetype for currently at-risk subscribers. On synthetic data it is judged against the generator's **latent archetype** (per-archetype precision/recall plus a confusion matrix). On real data it is judged against the weak labels of held-out churners. LLM labelling of free-text reasons is left as an optional extension (§11). | Reason codes and ticket categories exist in Shopify/Zendesk syncs. This is cheap, deterministic and testable. |
 | A4 (OQ4) | Cadence & deployment | **Daily** cycle (`schedule.cron="0 6 * * *"` UTC). Deployment = **Docker Compose** with `api` and `worker` services on any container host. The cloud target stays open. | Daily matches the data's update rhythm (warehouse syncs). One image runs on any cloud. |
@@ -50,7 +63,25 @@ The PRD left OQ1–OQ10 open. None of them blocks the design, because each one b
 | A11 (Scout) | Orchestration | **Plain Python step runner with warehouse checkpoints**, the "equivalent" the brief allows, instead of LangGraph. | The agent's per-subscriber work is a fixed pipeline whose decision step is the policy. Graph orchestration adds no capability here and makes idempotent replay harder. |
 | A12 (Scout) | Config mechanism | Two layers. (1) **Static files** in `config/`: source contract, schema names, model hyperparameters, intervention registry. They change at deploy time and are validated at startup. (2) **Runtime config table** `CHURN_OPS.AGENT_CONFIG`: tiers, thresholds, guardrails, holdout, budgets. It is re-read and validated (pydantic) at the start of every run and snapshotted per run. | R5.2 needs thresholds editable without redeploy, and Metabase is already the edit surface (D3). The contract and registry are deploy-time concerns. |
 
-Other Scout gaps:
+### 2.1 Revision 2 Scout gaps and how they are resolved
+
+| Gap (Scout, Revision 2) | Resolution |
+|---|---|
+| Main has no evaluation code, and T8 is still draft MR !18 | T8 stays in wave 5 with amended acceptance (§13.2). The new metrics go in T8's `model/evaluate.py`. T30 depends on T8 being merged and checks main for it before building. |
+| No validation split (dataset/train have only a holdout and a calibration share) | `model/evaluate.py` splits by snapshot date into training, validation and holdout, with a label-window purge (A1). It reuses `dataset.build_dataset()` and `train.fit()` unchanged, and `fit()` draws its calibration share from the training split only. `dataset.py` and `train.py` are not changed (both are shared with T18). |
+| No existing test that `customers_pii` is never read | T29 writes the test (`tests/unit/test_contract_pii.py`). It rests on a structural rule: views flagged `pii: true` are validated but never rendered into a CTE (§4.2). T25 later adds the code-path grep. |
+| Only subscriptions/orders mapped; generator writes two tables; T2 left no code | T29 rebuilds the generator and maps all eight views (§5.2, §13.1). |
+| No `edge_cases.py`, `profile.py`, `--profile` or `data-profile.md` | T29 creates them. |
+| Migration numbering is not contiguous, and "next free" is ambiguous | Decision (§5.3): never reuse a hole or any number that was ever merged. MR !5 merged `V002` in both `sql/synth/` and `sql/migrations/`. A database that applied it would fail `migrate.py`'s checksum check ("edited after it shipped") if V002 came back with different content. T29 therefore uses **`sql/synth/V003__synth_all_domains.sql`** and **`sql/migrations/V015__data_profile.sql`**: V014 is the highest on main, and V005 stays reserved for T8. Both numbers are re-checked against main right before use. |
+| T2's acceptance tests do not exist on main | T29 creates them with the same names and test ids as TASKS T2 (§13.1). |
+| The plan has 15 waves and the platform limit is unknown | No wave is added. T29 joins wave 6 (the next wave to be built), T30 joins wave 7, and T24 moves from wave 6 to wave 10 to free `cli.py` (§13.4). The plan stays at 15 waves. |
+| The size of the dataset behind T8's report is not recorded | T8's amended report must state the scale, snapshot rows and holdout rows (§6.3). T30 reads those numbers from the merged `docs/eval-report.md` and runs at the same scale or larger, and at least `small`. |
+| Tiny scale is too small for the top-2% and boundary tests | Metric, boundary and PASS/MISS logic are unit-tested on hand-built frames with known values. Integration tests on the tiny pipeline only check the report structure. The target check runs in the `slow` test at `small` scale. |
+| The T4 domains are tested only through the fixture's own contract, and the real pipeline uses stubs | T29's test runs `build_features` through the default contract on synthetic data. It asserts that no stub CTE is substituted and that every `has_<domain>` registry feature is 1 for some subscriber (§13.1). |
+| `test_contract_swap` copies only two tables | With eight views mapped it would fail validation. T29 changes the test to copy every mapped view generically. This adjusts the fixture only; T3's assertion is unchanged. |
+| T12 (wave 7) still plans `V007`, which T7 took | Outside this change's scope. The §5.3 rule applies when T12 is built: it takes the next free number. |
+
+Other Scout gaps (original plan):
 
 - **Greenfield**: §3 defines the whole layout. Wave 1 creates `pyproject.toml`, the test harness and CI config (`.gitlab-ci.yml`, since the repo is on GitLab).
 - **No Docker in the sandbox**: the Dockerfile and compose file are written and linted, but R8.7 is verified by Andre using the deployment guide. TASKS must mark it "operator-verified".
@@ -112,7 +143,7 @@ Imports flow one way only: `orchestration → {features, model, agent, execution
 - `model` (prediction pipeline) never imports `agent` or `execution`.
 - `agent` (decision logic) only reads scores and returns `Decision` objects. It never writes to the outbox.
 - `execution` (outbox and approvals) knows nothing about how a decision was made.
-- `synth` imports only `warehouse` and `contract`.
+- `synth` imports only `warehouse`, `settings` and `contract`, never `features` or `model`. As built, it imports `warehouse` and `settings`. T29 adds `tests/unit/test_synth_import_boundary.py` for this rule, and T26's general boundary test extends it.
 An `import-linter`-style test (`tests/unit/test_boundaries.py`, AST-based) enforces these rules.
 
 ## 4. Warehouse, configuration and the source contract
@@ -125,7 +156,7 @@ An `import-linter`-style test (`tests/unit/test_boundaries.py`, AST-based) enfor
 - SQL is restricted to constructs that both engines support and that sqlglot transpiles cleanly. CI runs every `sql/` file through the transpiler, and the integration suite executes them.
 
 ### 4.2 Source contract (R1.1, R1.3, R1.4)
-`config/source_contract.yaml` declares seven **logical views** with the required columns, types, primary/event keys and timestamp column. It also gives the physical object each one maps to (`{database}.{schema}.{view}`) and per-column renames:
+`config/source_contract.yaml` declares eight **logical views** with the required columns, types, primary/event keys and timestamp column. From Revision 2 on (R1.6, T29), all eight are mapped for the synthetic schema. Before that only `subscriptions` and `orders` were mapped, so the four T4 domains (email, subscription events, support, quiz) ran on the builder's empty stub CTEs in the real pipeline. It also gives the physical object each one maps to (`{database}.{schema}.{view}`) and per-column renames:
 
 | Logical view | Grain | Key columns (abbreviated) |
 |---|---|---|
@@ -137,6 +168,23 @@ An `import-linter`-style test (`tests/unit/test_boundaries.py`, AST-based) enfor
 | `support_tickets` | ticket | customer_id, ticket_id, created_at, category, escalated, resolution_hours, sentiment_score |
 | `quiz_responses` | answer | customer_id, quiz_session_id, question_key, answer_value, answered_at, recommended_sku |
 | `customers_pii` | customer | customer_id, first_name, email, phone, address (**declared PII, never selected by pipeline code**) |
+
+Column names follow what T4's feature SQL already reads, with its `-- stub` lines as the reference:
+- `subscription_events` has no `customer_id` and joins through `subscription_id`.
+- `email_events.event_type` takes the values `send`, `open`, `click` and `unsubscribe`.
+- `support_tickets` carries `escalated` (boolean) and `sentiment_score` (number).
+- `quiz_responses` has one row per answer, grouped by `quiz_session_id`.
+
+The generator matches these names, and the feature SQL is not changed. Dedup keys: subscriptions `subscription_id`, subscription_events `event_id`, orders `order_id`, products `blend_sku`, email_events `event_id`, support_tickets `ticket_id`, quiz_responses `answer_id` (per answer), customers_pii `customer_id`.
+
+**PII views (Revision 2, R1.6(c)):**
+- `View` in `contract/loader.py` gains `pii: bool = False`, and `customers_pii` sets `pii: true`.
+- `contract.validate` checks a PII view like any other. It uses information_schema only and reads no rows.
+- `contract.views.contract_ctes()` with no explicit names renders non-PII views only.
+- `view_cte()` raises `ContractError` for a PII view.
+- `key_map_frame()` skips PII views, because every customer is already in `subscriptions`.
+
+`features/builder.py` calls `contract_ctes(contract, pepper)` for all views, so the feature SQL it renders can never contain the PII view, and the builder needs no change.
 
 `contract.validate` runs at the start of every cycle and checks that each mapped object exists and has the columns with compatible types. If it does not, the run fails as `ContractError` before anything is written. `contract.views` renders a CTE per logical view (with renames, UTC normalisation and dedup `QUALIFY ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY loaded_at DESC)=1`), and all feature SQL selects from these CTEs, never from physical names. A swap to real views therefore edits only YAML (R1.3). `docs/data-contract.md` lists every item, and the "Switch to production views" section of `docs/deployment.md` walks the mapping steps (R1.4).
 
@@ -169,6 +217,19 @@ A latent-state simulator over a 24-month daily timeline, vectorised in numpy and
 
 The generator is deterministic for a given `synth.seed`, and the generator code does not import `churn.features` or `churn.model` (§2).
 
+**As-built status and Revision 2 rebuild (R1.7, T29).** T2 delivered the design above as MR !5, but a later commit removed its code from main. Main has the thin T1 generator (subscriptions and orders) plus T7's interim latent archetype: `latent.draw_archetypes`, `reasons_for`, `by_archetype`, `STRETCH_SCALE`, `DISCOUNT_BOOST`, `REFUND_BOOST`, and `generator.latent_archetypes(settings, scale)`. T29 rebuilds items 1–5 on top of that code rather than over it:
+- **Kept interfaces.** `latent_archetypes(settings, scale="tiny") -> pd.Series` keeps its signature (index `customer_id` `c{i:07d}`, values in `ARCHETYPES`) and stays a pure function of seed and scale, because `test_archetype_beats_chance_on_latent_truth` imports it. The archetype draw keeps its own RNG stream (`[seed, 4242]`), and the reason codes keep theirs (`[seed, 4243]`, `REASON_NOISE=0.25`). The latent truth per customer is therefore identical before and after T29. `ARCHETYPES`, the reason codes and the shares stay as T7 built them. Customer and subscription ids stay `c{i:07d}` / `s{i:07d}`.
+- **Replaced model.** The interim emission tables (`STRETCH_SCALE`, `DISCOUNT_BOOST`, `REFUND_BOOST`) are folded into one per-archetype emission table that drives every view:
+  - price-sensitive: discount redemptions, refunds, and `billing`/`price` tickets;
+  - efficacy-dissatisfied: `blend_switch` events, quiz retakes, and `product_not_working`/`efficacy` tickets;
+  - fatigued: skips, a longer cadence stretch, and decaying email opens and clicks;
+  - life change: abrupt `pause` events and `address_change`/`pause_request` tickets.
+  
+  Ticket categories are the ones in `config/archetype_labels.yaml`, with category noise like that on the reason codes. The old names `STRETCH_SCALE`, `DISCOUNT_BOOST`, `REFUND_BOOST` and `by_archetype` may stay as aliases or be removed, as long as nothing outside `synth` imports them (today only generator.py does). Involuntary churn becomes an independent payment-failure hazard, and the earlier of the two cancellation times wins. This replaces the interim `INVOLUNTARY_SHARE` split.
+- **Latent truth table.** The generator also writes `THESIS_SYNTH.latent_truth(customer_id, archetype, price_sensitivity, fatigue, hazard_per_day, churn_cause)`. The table is not in the source contract, so the pipeline cannot read it. It exists for evaluation and tests, and a test asserts that it equals `latent_archetypes()`.
+- **Separability.** T7 recorded a life_change precision of about 0.26 against the 0.25 threshold. The rebuilt model gives each archetype a footprint in a different view (for life change: pauses and address tickets). These signals now reach the features because every view is mapped. The threshold in T7's test does not change (PRD §7): if the test fails, the emission strengths are tuned, not the test.
+- `synth/edge_cases.py` applies item 3 after the clean frames are built. `synth/profile.py` implements item 5 from the physical `THESIS_SYNTH` tables, without going through the contract or the features.
+
 ### 5.3 Output tables (`CHURN_OPS`, R3.5, R6.1)
 All tables are created by `sql/migrations/V00x__*.sql`, applied by `churn migrate` (tracked in `SCHEMA_MIGRATIONS(version, checksum, applied_at)`, `CREATE ... IF NOT EXISTS`, additive only). Primary keys are logical (enforced by MERGE keys, because Snowflake does not enforce PKs).
 
@@ -189,7 +250,10 @@ All tables are created by `sql/migrations/V00x__*.sql`, applied by `churn migrat
 | `OUTCOMES` | decision_id | response (opened/clicked/redeemed/none), outcome (retained/churned/unknown), measured_at, window_days |
 | `POLICY_STATS` | archetype, intervention_type, context_bucket | alpha, beta (Beta posterior), n, last_updated_run |
 | `RUN_METRICS` | run_id, metric | coverage, autonomy_rate, audit_completeness, at-risk count, LLM calls, fallbacks, duration, treated-vs-control churn |
-| `EVAL_REPORTS` | report_id | model and archetype evaluation results |
+| `EVAL_REPORTS` | report_id | model and archetype evaluation results (T8, `V005`). Periods, counts, metrics and per-target PASS/MISS rows are stored as JSON, so the Revision 2 metrics need no new migration |
+| `DATA_PROFILE` | profiled_at, section, item | synthetic data profile (T29, `V015__data_profile.sql`): sections `rows` (per view), `edge_case` (share per category) and `churn_timeline` (voluntary/involuntary per month), each with value, scale and seed |
+
+**Migration numbering (Revision 2).** `SCHEMA_MIGRATIONS` tracks two separate series, `synth/V###` and `V###`. A new migration takes the highest number ever merged in its series plus one, checked on main right before numbering. Holes are not reused. MR !5 merged `V002` in both series, and an existing database may have it recorded with the old checksum; `V005` is reserved for T8. Two tickets in the same wave must not take the same number. A developer database that applied MR !5's migrations should be recreated (`rm artefacts/local.duckdb`).
 
 ## 6. Interfaces and processing
 
@@ -237,7 +301,24 @@ Leakage (R2.3): all SQL is parameterised on `:as_of`, and the test appends post-
 - **Explanations**: `pred_contrib=True` gives per-feature log-odds contributions plus a bias term. The top-k (k=5, minimum 3 when enough features are non-missing) by |contribution| are rendered to text through registry templates ("Email opens down 42% vs prior 60 days ↑ risk"). Test: contributions + bias equals the raw margin to within 1e-6, and the ranked factors' signs match their direction labels (R3.2).
 - **Archetype**: multinomial logistic regression over standardised features. It is trained on churned snapshots that have weak labels (A3) and applied to at-risk subscribers. It outputs probabilities, the argmax and its confidence. `low_confidence = max_prob < archetype.min_conf (0.40) or top1 - top2 < archetype.min_margin (0.10)`, and the agent handles that case (§6.4). As built (T7): the classifier lives in `model/archetype.py` and is stored in the model bundle as `bundle["archetype"]` by `churn train`. It is a pipeline of median imputation, `StandardScaler` and `LogisticRegression` (class-balanced, seeded). The thresholds are the constants `MIN_CONF` and `MIN_MARGIN` in that module, not keys in `settings.yaml`. A weak label is the mapped cancellation reason code of a voluntary churner; when the code is missing or unmapped, it is the most frequent mapped support-ticket category (ties are broken in archetype order). Anything else has no label and is left out of training. Scoring classifies every scored row, which includes every at-risk row, and writes `archetype`, `archetype_conf` (max probability), `archetype_probs` and `archetype_low_conf`. If there are fewer than 20 labelled churners, or only one class, no classifier is fitted and the four columns are NULL.
 - **Tiers** come from the runtime config boundaries (R3.4).
-- **Evaluation** (`model.evaluate`, `churn evaluate`) runs on the time holdout (A1) and writes `docs/model-card.md`, `docs/eval-report.md` and `EVAL_REPORTS`. Contents: top-decile precision, recall of at-risk tiers among churners (pre-cancellation recall = churners whose last score before cancelling was ≥ the at-risk boundary), PR-AUC and ROC-AUC, calibration, per-archetype precision/recall and confusion matrix, and a check of every target against R3.6 that prints **MISS with a stated reason** when a target is not met.
+- **Evaluation** (`model.evaluate`, `churn evaluate`; amended in Revision 2 for R3.6 and D4–D8) writes `docs/model-card.md`, `docs/eval-report.md` and `EVAL_REPORTS`.
+  - *Splits.* The `build_dataset()` snapshots are split by date into training, validation and holdout (A1). An **evaluation model** is fitted with `train.fit()` on the training split only. It uses the same features and hyperparameters as `churn train` and is neither registered nor promoted. It scores the validation and holdout splits. The model card states that the production model is refit on all snapshots and that the reported metrics come from this evaluation fit.
+  - *Unit.* A holdout row is one (subscriber, snapshot) pair, pooled over the holdout snapshots. Rows are ranked by calibrated `churn_prob` descending, with ties broken by `subscriber_key` and then `snapshot_date`, so every metric is deterministic.
+  - *Base rate* b = positives / rows in the holdout.
+  - *Top-share precision* = positives among the top ⌈0.02 · n⌉ rows, divided by that count (`TOP_SHARE=0.02`). *Top-decile precision* is the same with 0.10, and *top-decile lift* = top-decile precision / b.
+  - *Pre-cancellation recall at threshold t* = the share of churners with score ≥ t. Each voluntary churner counts once, through its latest positive snapshot in the split, which is its last score before cancelling.
+  - *Boundary (D7, D8).* Sort the **validation** churner scores descending, s₁ ≥ … ≥ sₖ. The boundary is t* = s₍⌈0.65·k⌉₎, the highest threshold whose validation recall is ≥ 0.65 (`BOUNDARY_MIN_RECALL=0.65`). The function's signature takes the validation frame alone, so holdout data cannot move the boundary.
+    - If the validation split has fewer than `MIN_VALIDATION_CHURNERS=20` churners, or no scored churner, there is no boundary, and the recall target is MISS with that reason. The code never falls back to the holdout or to the runtime 0.20 boundary.
+    - On the holdout, the report gives recall at t* (the target) and precision at t* = positives / rows with score ≥ t* (reported, with no target), each with its counts.
+  - *Targets.* `TARGETS = {top_share_precision: > 0.50, top_decile_lift: ≥ 4.0, pre_cancellation_recall: > 0.60}`, as constants in `evaluate.py`. Each target prints PASS or **MISS with a reason**. The reason names the measured value and the count behind it. Where it applies, it also says that the target is above its ceiling at the measured base rate (top-2% precision is unreachable when b ≤ 0.01) or that the sample is small.
+  - *Ceiling section.* The report prints b, the top-decile ceiling min(1, b/0.10) with its lift min(10, 1/b), and the top-2% ceiling min(1, b/0.02). It also explains why the brief's 0.70 top-decile target was replaced (A1).
+  - *Other contents (unchanged):*
+    - label definition and window, the training, validation and holdout periods, scale and row counts;
+    - PR-AUC, ROC-AUC and calibration;
+    - per-archetype precision/recall and a confusion matrix against the latent archetype, from `latent_archetypes()` or `THESIS_SYNTH.latent_truth` (T29 keeps the two equal);
+    - the honest statements that accuracy on synthetic data is not real-world accuracy, and that the 90-day impact target (R6.6) can only be checked after go-live.
+  - *The boundary is evaluation-only (D8).* It is printed as the "recommended at-risk boundary". `evaluate` never writes `AGENT_CONFIG`, `CONFIG_SNAPSHOTS` or `RISK_SCORES`, and the runtime tiers (R3.4, A6) are unchanged.
+  - *Data provenance (R3.8, added by T30).* The report states the mapped contract views (all eight), the synth scale and seed, and the snapshot and holdout row counts. It includes a feature-domain coverage table: the share of holdout rows with each `has_<domain> = 1` and with `orders_total > 0`.
 - **Registry and promotion** (R6.3): artefacts are stored as a joblib file under `@CHURN_OPS.MODEL_STAGE` (Snowflake) or `artefacts/models/` (local), with SHA-256 recorded. A candidate is promoted only if top-decile precision and PR-AUC on the same holdout are ≥ the current model's minus `retrain.tolerance` (0.01). Otherwise it is rejected with the metrics recorded. The first model is promoted if it trains successfully.
 
 ### 6.4 Agent (R4.1–R4.6, R6.4)
@@ -323,6 +404,14 @@ Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score ro
 | Retrained model worse | Rejected, with metrics in `MODEL_REGISTRY`. The current model stays. | R6.3 |
 | Low or tied archetype confidence | Mixture posterior across the top 2. If the tier is critical, escalation is forced. | §7 PRD |
 | Zero active subscribers / model missing | The run succeeds with zero counts and a warning / the run fails as `ModelError` with a runbook pointer (`churn train`). | R3.1 |
+| Evaluation: the validation split has < 20 churners, or no threshold reaches 0.65 validation recall | No boundary is set, and the recall target is MISS with that reason. There is no fallback to the holdout or to the runtime boundary. | R3.6 |
+| Evaluation: the top 2% of the holdout holds few rows (small runs) | Every precision figure is printed with its count, and a small count is named in the MISS reason. | R3.6 |
+| Evaluation: the measured base rate differs from 3.1% | Ceilings are computed from the measured rate. A target above its ceiling is MISS "unreachable at base rate b". | R3.6 |
+| Evaluation: a split has a single class | Metrics that need both classes are reported as n/a with the reason, and the affected targets are MISS. | R3.6 |
+| A contract view is unmapped (the real source lacks a domain) | Unchanged: the builder substitutes the typed stub and sets `has_<domain> = 0`. On synthetic data all eight views are mapped, and a test fails if any stub is used. | R1.6, R2.4 |
+| Pipeline code asks for the PII view | `view_cte()` raises `ContractError`, and default rendering skips PII views. | R1.6, R7.1 |
+| The rebuilt generator weakens the archetype signal | T7's latent-truth test fails at its unchanged 0.25 threshold. The emission strengths are tuned, not the test. | R1.7 |
+| A database applied MR !5's V002 migrations | The new migrations use synth/V003 and V015, so no checksums clash. Deleting the local DuckDB file recreates the old tables. | R1.7 |
 
 ## 9. Security, privacy and cost
 
@@ -340,8 +429,10 @@ Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score ro
 
 | Req | Met by |
 |---|---|
-| R1.1 | `sql/synth/V001`, contract views for all domains, `docs/data-contract.md` |
-| R1.2 | `synth.generator` (A5 scale, edge-case injection, historical churn), `synth.profile` → data profile report |
+| R1.1 | `sql/synth/V001` + `sql/synth/V003` (T29, superseding T2), contract views for all domains, `docs/data-contract.md` |
+| R1.2 | `synth.generator` (A5 scale, edge-case injection, historical churn), `synth.edge_cases`, `synth.profile` → `docs/data-profile.md` + `DATA_PROFILE` (T29; volume in T27) |
+| R1.6 | `config/source_contract.yaml` maps all eight views; `pii` flag in `contract/loader.py` and `views.py`. Tests: all eight validate, no stub is used, every `has_<domain>` is populated, the PII view is never rendered (T29) |
+| R1.7 | T29 rebuild on main (§5.2 as-built note): `latent_archetypes()` interface kept, migrations synth/V003 and V015, T2 acceptance tests recreated, T7's latent-truth test re-run unchanged, T2 marked superseded (§13) |
 | R1.3 | `config/source_contract.yaml` + `contract.views`. Integration test points the pipeline at a second DuckDB schema by config only. |
 | R1.4 | `docs/data-contract.md` + "Switch to production views" in `docs/deployment.md` |
 | R1.5 | Warehouse-only IO. A test asserts no HTTP clients other than the LLM SDKs are imported. All outputs are `CHURN_OPS` tables. |
@@ -351,7 +442,8 @@ Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score ro
 | R3.3 | `model.archetype` (A3), archetype section of the eval report |
 | R3.4 | Tier boundaries in `AGENT_CONFIG`, test changes the config and re-runs |
 | R3.5 | `RISK_SCORES` keyed by run, with history. An example query is in `docs/output-tables.md`. |
-| R3.6 | `model.evaluate` → `docs/eval-report.md` (honest MISS reporting) |
+| R3.6 | `model.evaluate` (T8, amended): top-2% precision, top-decile lift, pre-cancellation recall at the validation-chosen boundary, precision at the boundary, ceiling arithmetic, PASS/MISS with reasons → `docs/eval-report.md`, `docs/model-card.md`, `EVAL_REPORTS` (§6.3) |
+| R3.8 | T30: rerun `churn evaluate` on T29's full synthetic data with all views mapped, and regenerate the report and model card with provenance and domain coverage |
 | R3.7 | `worker` scheduler + `churn simulate` consecutive-run test |
 | R4.1–R4.3 | `interventions/*`, `agent.policy`, routing-scenario tests, formulation fallback tests |
 | R4.4, R7.1, R7.2 | `agent.content` whitelisted prompt, key pseudonymisation, PII scan tests |
@@ -387,7 +479,138 @@ Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score ro
 All tests run with `python -m pytest` from the repo root, with no network or credentials. Test layers:
 - **Unit** (`tests/unit`): feature functions on hand-built fixtures (each of the five indicators against a known value), leakage, explain consistency, tier assignment from config, guardrails, gate (threshold, `approve_all` fallback), policy (same score with different tenure or archetype gives different actions, low-confidence escalation, seeded determinism), formulation fallback, prompt whitelist, content validator and template fallback, config validation, error taxonomy and log format, module boundaries.
 - **Integration** (`tests/integration`, DuckDB with a small seeded synth, about 2k subscribers): end-to-end cycle, contract swap to a second schema, approval lifecycle (approve, reject, expire, invalid, late edit, tamper), outbox replay idempotency (cycle run twice gives identical keys and counts), fault injection (source unavailable, write failure at shard k, LLM timeout, simulated kill between steps, then rerun), outcomes after the window, policy shift over simulated days, retrain promote/reject, PII scan, extensibility via the dummy intervention, and FastAPI endpoints. LLM = `FakeLLM` (scriptable failures).
-- **Evaluation** (`-m slow`): a medium synth (about 30k subscribers) trains the model, runs `churn simulate --days 45`, and asserts on coverage, autonomy and audit completeness. Precision and recall are reported, and the targets are asserted with an explicit xfail-with-reason if missed, so a miss is visible and not hidden.
+- **Evaluation** (`-m slow`): a medium synth (about 30k subscribers) trains the model, runs `churn simulate --days 45`, and asserts on coverage, autonomy and audit completeness. The three R3.6 targets (top-2% precision, top-decile lift, pre-cancellation recall at the validation-chosen boundary) are asserted, with an explicit xfail-with-reason if missed, so a miss is visible and not hidden. Tiny scale has too few churners for the metric, boundary and ceiling logic, so that logic is unit-tested on hand-built frames with known values.
 - **Scale** (`-m scale`): A5 full-scale generation and a timed cycle on DuckDB. Asserts duration < cycle interval and records it.
 - **Snowflake** (`-m snowflake`): migrations, MERGE semantics and a small cycle against a real account, skipped without `SNOWFLAKE_*` env. Run by Andre.
 - **CI** (`.gitlab-ci.yml`): ruff, then the unit and integration tests, then a JUnit artefact, then `docs/test-results.md`.
+
+## 13. Revision 2 ticket plan (for TASKS.md and WAVES.md)
+
+Waves 1–4 are shipped, and wave 5 (T8, T9, T11, T14) is in progress. No merged ticket's scope changes, except T2 (superseded) and T8 (amended, still in progress) as stated below.
+
+### 13.1 T29 — Rebuild the full synthetic source on main and map every contract view (supersedes T2)
+
+One ticket covers both R1.7 and R1.6. The mapping cannot be validated or tested until the views exist, and both changes edit `config/source_contract.yaml`. Before building, confirm on main that T2's files are absent and T7's interim code is present (the lesson from T4: check main, not the plan).
+
+**Slice.** TASKS T2 is the spec, rebuilt on current main as described in the §5.2 as-built note. The generator writes all eight contract views, with latent archetypes and `latent_truth`, noisy reason codes and ticket categories, independent involuntary churn, and the edge cases. `churn synth --profile` writes `docs/data-profile.md` and `CHURN_OPS.DATA_PROFILE`. `config/source_contract.yaml` maps all eight views with T4's column names, and `customers_pii` gets `pii: true`.
+
+**Files:**
+- `config/source_contract.yaml`
+- `sql/synth/V003__synth_all_domains.sql` (six new source tables plus `latent_truth`; next free synth number, §5.3)
+- `sql/migrations/V015__data_profile.sql` (next free ops number, §5.3)
+- `src/churn/synth/generator.py`, `src/churn/synth/latent.py` (replace the interim model, keep `latent_archetypes()`)
+- `src/churn/synth/edge_cases.py`, `src/churn/synth/profile.py` (new)
+- `src/churn/contract/loader.py`, `src/churn/contract/views.py` (`pii` flag, additive)
+- `src/churn/cli.py` (`synth --profile` option, additive)
+- `docs/data-profile.md` (generated at `small` scale, with the scale stated in the header) and `docs/data-contract.md` (eight views mapped, PII flag)
+- `tests/unit/test_synth_latent.py`, `tests/unit/test_synth_import_boundary.py`, `tests/integration/test_synth_profile.py` (T2's test names)
+- `tests/unit/test_contract_pii.py`, `tests/integration/test_contract_all_views.py` (new)
+- `tests/integration/test_contract_swap.py` (copies every mapped view; assertion unchanged)
+- `docs/plans/churn-prediction/tickets/T29.md`
+
+**Acceptance tests:**
+- T2's six tests, recreated:
+  - `test_synth_profile.py::test_every_domain_has_view`
+  - `test_synth_profile.py::test_edge_case_shares_above_zero`
+  - `test_synth_profile.py::test_churn_events_span_label_and_eval_window` (30-day horizon + 3-month holdout + 3-month validation)
+  - `test_synth_latent.py::test_deterministic_for_seed`
+  - `test_synth_latent.py::test_reason_codes_follow_latent_archetype_with_noise`
+  - `test_synth_import_boundary.py::test_synth_does_not_import_features_or_model`
+- `test_synth_latent.py::test_latent_truth_table_matches_latent_archetypes`: the table equals `latent_archetypes(settings, scale)`, and each customer's archetype is the same as under the interim model for the same seed.
+- `test_contract_all_views.py::test_all_eight_views_mapped_and_validate`: the contract keys are exactly the eight views, and `contract.validate` passes on synthetic data.
+- `test_contract_all_views.py::test_no_stub_cte_used_with_default_contract`: every view named in a T4 `-- stub` line is mapped, so `render_feature_sql` adds no stub.
+- `test_contract_all_views.py::test_every_feature_domain_populated_on_synthetic_data`: features are built through the default contract at the pipeline's as_of.
+  - Every registry feature whose name starts with `has_` is 1 for at least one subscriber. Today these are `has_subscription_events`, `has_email`, `has_support` and `has_quiz`, and new ones are picked up automatically.
+  - `orders_total > 0` for at least one subscriber. Orders has no indicator because the view is required.
+- `test_contract_pii.py::test_pii_view_never_rendered`: neither the rendered feature SQL nor the key-map SQL contains `customers_pii` or the source names of its columns, and `view_cte` on the PII view raises `ContractError`.
+- Re-check, unchanged: `test_archetype_scoring.py::test_archetype_beats_chance_on_latent_truth` (threshold 0.25) passes against the full model. The full suite and ruff pass, and no migration number is reused.
+- Plan docs: TASKS.md shows T2 as "Superseded by T29 (Revision 2): merged as MR !5, code no longer on main", with its slice kept for reference. The coverage table lists T29 for R1.1, R1.2 (with T27), R1.6 and R1.7.
+
+**Covers:** R1.1, R1.2 (content), R1.6, R1.7.
+
+### 13.2 T8 amendment (in progress, wave 5, MR !18)
+
+The scope stays "evaluation report and model card with honest target check", and the files stay the same: `model/evaluate.py`, `V005__eval_reports.sql`, `cli.py`, `docs/eval-report.md`, `docs/model-card.md` and the two test files.
+
+New slice wording: `churn evaluate` splits snapshots into training, validation and holdout (A1), fits an evaluation model on training only, and chooses the at-risk boundary on validation (D7). On the holdout it computes:
+- the base rate;
+- top-2% precision, top-decile precision and top-decile lift;
+- pre-cancellation recall and precision at the boundary;
+- PR-AUC/ROC-AUC and calibration;
+- per-archetype metrics;
+- the ceiling arithmetic.
+
+Each R3.6 target is PASS, or MISS with a reason (§6.3).
+
+These acceptance tests replace the top-decile-precision ones:
+- `test_evaluate_metrics.py`:
+  - `::test_top_share_precision_known_value`
+  - `::test_top_decile_lift_known_value`
+  - `::test_pre_cancellation_recall_uses_last_score_before_cancel` (kept)
+  - `::test_boundary_is_highest_threshold_with_validation_recall_at_least_065`
+  - `::test_boundary_ignores_holdout_data`
+  - `::test_too_few_validation_churners_is_recall_miss_with_reason`
+  - `::test_ceilings_from_measured_base_rate`
+  - `::test_splits_are_disjoint_ordered_and_purged`
+  - `::test_missed_target_reported_as_miss_with_reason` (kept)
+- `test_eval_report.py`:
+  - `::test_report_states_label_window_validation_and_holdout`
+  - `::test_report_has_per_archetype_precision` (kept)
+  - `::test_report_shows_counts_ceiling_and_recommended_boundary`
+  - `::test_evaluate_does_not_write_agent_config` (D8)
+  - `::test_targets_on_medium_synth` (slow): top-2% precision > 0.50, lift ≥ 4× and recall > 0.60, or xfail with the stated reason.
+
+T8 runs on whatever synthetic data main has, which is the thin generator until T29 lands. An honest MISS is acceptable. The report must record the scale and row counts so that T30 can compare.
+
+### 13.3 T30 — Re-evaluate on the full synthetic data and regenerate the report and model card
+
+**Depends on** T8 and T29 being merged (check main first).
+
+**Slice:**
+- Add the data-provenance and feature-domain coverage section to the report (§6.3).
+- Regenerate the synthetic data with every view mapped, at the scale T8 used or larger, and at least `small`.
+- Run `churn evaluate`, and commit the regenerated `docs/eval-report.md` and `docs/model-card.md`.
+
+A target that is still missed is acceptable as MISS with a reason (D9).
+
+**Files:** `src/churn/model/evaluate.py` (additive section), `docs/eval-report.md`, `docs/model-card.md`, `tests/integration/test_eval_full_source.py`, `docs/plans/churn-prediction/tickets/T30.md`.
+
+**Acceptance tests:**
+- `test_eval_full_source.py::test_report_states_full_source_all_eight_views`: the provenance section lists the eight mapped views and the scale.
+- `test_eval_full_source.py::test_domain_coverage_every_domain_populated`: every `has_<domain>` share and the orders share are above 0.
+- `test_eval_full_source.py::test_committed_report_has_every_r3_6_line`: the committed report contains every R3.6 metric, the ceiling section and a PASS/MISS line per target. Its holdout row count is at least the count in T8's merged report, which is recorded in `tickets/T30.md`.
+
+**Covers:** R3.8 (and R3.6 on the full data).
+
+### 13.4 Wave placement
+
+| Wave | Tickets (Revision 2) | Change |
+|---|---|---|
+| 1–4 | unchanged (shipped) | T2 stays listed in wave 2, marked shipped and then superseded |
+| 5 | T8, T9, T11, T14 | T8 acceptance amended (§13.2) |
+| 6 | **T13, T29** | T29 added, since wave 6 is the next wave to be built. T24 moves out because T24 and T29 both edit `cli.py` |
+| 7 | T12, T15, T26, T27, **T30** | T30 added. It needs T8 (wave 5) and T29 (wave 6), and its files are disjoint from the other four (T27 edits `generator.py` and `cli.py`; T30 edits neither) |
+| 10 | T19, **T24** | T24 moved here. Its files are disjoint from T19's (`runner.py`, `metrics.py`, V011), so there is no conflict on `cli.py` or `pyproject.toml` in wave 10. Its only dependent, T23, is in wave 14 |
+| 8, 9, 11–15 | unchanged | |
+
+The plan stays at 15 waves. Additions to the shared-files table:
+- `config/source_contract.yaml`: T1, T2, T29
+- `src/churn/cli.py`: add T29
+- `synth/generator.py` and `latent.py`: add T29
+- `contract/views.py` and `loader.py`: add T29
+- `model/evaluate.py`: T8, T30
+- `tests/integration/test_contract_swap.py`: T3, T29
+
+T29 and T13 share no file.
+
+### 13.5 Reused, not built
+
+- Contract validation, CTE rendering, dedup/UTC and pseudonymous keys (T3), the builder's stub mechanism and the feature SQL (T4), all unchanged.
+- `dataset.build_dataset()` and `train.fit()` for the evaluation splits, with no new training path.
+- T7's archetype draw and reason streams, so the latent truth per customer stays the same.
+- The JSON columns of `EVAL_REPORTS` (T8's V005) for the new metrics, and the migration runner with its checksum rule for numbering.
+
+### 13.6 Cost and security notes
+
+- With all eight views mapped, every snapshot's feature query joins four more domains. At tiny scale the suite runtime rises modestly, and the `small`-scale evaluation (T30) is a one-off run by the builder. At `default` scale the quiz rows run into the millions (T27 measures this).
+- `latent_truth` and `customers_pii` sit only in `THESIS_SYNTH`. `latent_truth` is not in the contract and `customers_pii` is never rendered, so neither can reach features, prompts, logs or model artefacts.
