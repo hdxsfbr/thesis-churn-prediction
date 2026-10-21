@@ -75,8 +75,9 @@ def run_cycle(
         validate(wh, contract)
         version, _ = load_promoted(wh, settings)
         active = count_active(wh, settings, contract, as_of_dt)
-        features = build_features(wh, settings, contract, as_of_dt)
+        features = build_features(wh, settings, contract, as_of_dt, current_status=True)
         frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
+
 
         with wh.transaction():
             populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)

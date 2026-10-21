@@ -75,3 +75,21 @@ In Snowflake, grant `CHURN_PRIVATE` to the sender and app roles only.
 
 Every view also yields `subscriber_key` and `loaded_at`. Further views (email, support, quiz) are added to
 the same YAML by later tickets and must be listed here.
+
+## Optional views read by the feature SQL
+
+The feature SQL (`sql/features/`) also reads the logical views below. Each is optional: when the contract
+does not map one, `churn.features.builder` substitutes an empty typed CTE with these columns, declared by
+the `-- stub <view>: ...` line of the domain file. Rows are still scored. The domain's counts are 0, its rates,
+deltas and recencies are NULL, and its `has_<domain>` indicator is 0 (R2.4). To light a domain up, map the
+view in the YAML with at least these logical columns (plus `dedup_key` and `loaded_at`).
+
+| Logical view | Domain file | Columns the feature SQL reads |
+|---|---|---|
+| `subscription_events` | `subscription_events.sql` | `subscription_id`, `event_id`, `event_type` (`skip`, `pause`, `blend_switch`, ...), `event_ts`. Joined to the subscriber's active subscription on `subscription_id`. |
+| `email_events` | `email.sql` | `customer_id` (→ `subscriber_key`), `event_id`, `event_type` (`send`, `open`, `click`, `unsubscribe`), `event_ts` |
+| `support_tickets` | `support.sql` | `customer_id` (→ `subscriber_key`), `ticket_id`, `created_at`, `category`, `escalated` (boolean), `sentiment_score` (number) |
+| `quiz_responses` | `quiz.sql` | `customer_id` (→ `subscriber_key`), `quiz_session_id`, `question_key`, `answer_value`, `answered_at`, `recommended_sku` (one row per answer, grouped into sessions by `quiz_session_id`) |
+
+`subscriptions` and `orders` are required. Every feature counts a row only if its event time is before
+`as_of` and its `loaded_at` is on or before `as_of` (R2.3). The generated catalogue is in `docs/features.md`.

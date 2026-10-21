@@ -229,7 +229,7 @@ Other features: tenure_days, orders_90/365, days_since_last_order, refund_count/
 
 Missing data: counts default to 0. Rates and recencies stay NULL, with explicit `has_<domain>` indicators. LightGBM handles NULLs natively, so no subscriber errors out (R2.4). Brand-new subscribers get tenure-truncated windows normalised by `min(tenure, window)`.
 
-Leakage (R2.3): all SQL is parameterised on `:as_of`, and the test appends post-`as_of` events and asserts equality.
+Leakage (R2.3): all SQL is parameterised on `:as_of`, and the test appends post-`as_of` events and asserts equality. Status flags (operator decision, 2026-10-21, T4): `status_paused` comes from the latest pause/resume event before `as_of`. `status_past_due` reads today's `subscriptions.status` only in the live run (`build_features(..., current_status=True)` from `orchestration.runner`), because the source has no status history. It is NULL in training snapshots. Price change is `price_change_90`: the average order amount in the last 90 days minus the average in days 91–180.
 
 ### 6.3 Model (R3.1–R3.6, R6.3)
 - **Dataset**: monthly point-in-time snapshots over the history, using the same feature SQL with `as_of = snapshot date` and the A1 label. Subscribers active at the snapshot only. Intervention-history features are included.
