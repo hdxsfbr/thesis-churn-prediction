@@ -75,6 +75,7 @@ sql/
   features/*.sql                      # one file per domain, Snowflake dialect, :as_of bound
 src/churn/
   settings.py          # pydantic-settings: files + env (secrets only from env)
+  runtime_config.py    # AGENT_CONFIG → validated RuntimeConfig, CONFIG_SNAPSHOTS pinning, tier assignment (§4.3)
   obs/                 # logging.py (structlog JSON, run_id/component bound), errors.py (taxonomy)
   warehouse/           # base.py Warehouse protocol; snowflake.py; duckdb.py; dialect.py (sqlglot);
                        # migrate.py; bulk.py (stage-then-MERGE writer)
@@ -142,10 +143,11 @@ An `import-linter`-style test (`tests/unit/test_boundaries.py`, AST-based) enfor
 **Pseudonymous key (R7.1):** the contract CTEs emit `subscriber_key = SHA2(:pepper || customer_id, 256)`, with the pepper taken from env `CHURN_KEY_PEPPER`. All `CHURN_OPS` tables carry `subscriber_key` only. A single table, `CHURN_PRIVATE.KEY_MAP(subscriber_key, customer_id)`, sits in a separate schema readable only by `CHURN_SENDER` and `CHURN_APP`. The downstream sender joins the outbox through the view `CHURN_PRIVATE.OUTBOX_FOR_SENDER`. Analysts and approvers never need the raw id. The approval view shows enough non-PII context to decide.
 
 ### 4.3 Runtime config (R3.4, R4.6, R5.2, fail-safe)
-`CHURN_OPS.AGENT_CONFIG(key, value_json, updated_by, updated_at)`, seeded from `runtime_defaults.yaml` by `churn bootstrap` and editable in Metabase. At run start, `settings.runtime.load()` parses every row into a pydantic `RuntimeConfig` and writes the effective config to `CONFIG_SNAPSHOTS(run_id, config_json, valid, errors)`. Failure rules:
+`CHURN_OPS.AGENT_CONFIG(key, value_json, updated_by, updated_at)`, seeded from `runtime_defaults.yaml` by `churn bootstrap` and editable in Metabase. At run start, `churn.runtime_config.load_pinned()` (as built in T5; earlier drafts named it `settings.runtime.load()`) parses every row into a pydantic `RuntimeConfig` and writes the effective config to `CONFIG_SNAPSHOTS(run_id, config_json, valid, errors, gate_mode, agent_halt, created_at)`. `RUNS.config_snapshot_id` points at it. The config has five sections (`gate`, `tiers`, `guardrails`, `holdout`, `outcomes`). Validation never raises: a section that is missing, malformed JSON or out of range becomes `None` and is named in `errors`. Failure rules:
 - **Gate thresholds missing or invalid** → `gate.mode = "approve_all"`. Every decision goes to approval, none to the outbox, and the run is marked `DEGRADED` with error class `ConfigError`.
-- **Tier boundaries or guardrails invalid** → the agent step **halts** (scores are still written). Without guardrails no safe action exists.
-- **Valid** → the snapshot is pinned to the run, and a rerun of the same run id reuses the snapshot, not the current table (R8.2).
+- **Tier boundaries or guardrails invalid** → the agent step **halts** (scores are still written). Without guardrails no safe action exists. As built, `holdout` and `outcomes` sections that are missing or invalid also halt (PRD §7: never silently default). A halt also marks the run `DEGRADED` with error class `ConfigError`. Invalid tiers leave `RISK_SCORES.tier` NULL rather than inventing a tier.
+- **Valid** → the snapshot is pinned to the run, and a rerun of the same run id reuses the snapshot, not the current table (R8.2). As built, an invalid snapshot is pinned the same way, so a rerun of a degraded run stays fail-safe.
+- `churn bootstrap` inserts only missing keys and keeps edited rows. `churn bootstrap --reset` overwrites them with the defaults.
 
 ## 5. Data layer
 

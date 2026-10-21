@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from churn import runtime_config
 from churn.model.train import train as train_model
 from churn.orchestration.runner import RunFailed, run_cycle
 from churn.settings import Settings
@@ -33,6 +34,14 @@ def migrate() -> None:
     wh = open_warehouse(settings)
     applied = apply_migrations(wh, settings)
     typer.echo(f"applied: {', '.join(applied) if applied else 'nothing (up to date)'}")
+
+
+@app.command()
+def bootstrap(reset: bool = typer.Option(False, help="Overwrite edited AGENT_CONFIG rows with the defaults")) -> None:
+    """Migrate, then seed CHURN_OPS.AGENT_CONFIG from config/runtime_defaults.yaml (keeps edits)."""
+    settings, wh = _open()
+    n = runtime_config.seed(wh, settings, overwrite=reset)
+    typer.echo(f"AGENT_CONFIG seeded ({n} default keys{', overwritten' if reset else ', existing kept'})")
 
 
 @app.command()
@@ -64,6 +73,8 @@ def cycle(
         typer.echo(f"run FAILED: {exc}", err=True)
         raise typer.Exit(1) from exc
     typer.echo(f"{result.run_id}: scored {result.scored} of {result.active_in_source} active subscribers")
+    if result.status == "DEGRADED":
+        typer.echo(f"run DEGRADED: gate_mode={result.gate_mode}, agent_halted={result.agent_halted}", err=True)
 
 
 if __name__ == "__main__":

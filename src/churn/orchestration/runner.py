@@ -17,6 +17,7 @@ from churn.contract.views import populate_key_map
 from churn.features.builder import as_of_ts, build_features, count_active
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
+from churn.runtime_config import RuntimeConfig, load_pinned
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
 
@@ -35,6 +36,8 @@ class RunResult:
     model_version: str
     active_in_source: int
     scored: int
+    gate_mode: str = "normal"
+    agent_halted: bool = False
 
 
 def default_run_id(as_of: date | datetime, kind: str = "scheduled") -> str:
@@ -59,18 +62,22 @@ def run_cycle(
     t0 = time.monotonic()
     base = {"run_id": run_id, "kind": kind, "as_of": as_of_dt, "started_at": started}
     _write_run(wh, ops, **base, status="RUNNING", model_version=None, active_in_source=None,
-               scored=None, ended_at=None, duration_s=None, error_msg=None)
+               scored=None, ended_at=None, duration_s=None, error_msg=None,
+               config_snapshot_id=None, error_class=None)
 
     active: int | None = None
     scored: int | None = None
     version: str | None = None
+    cfg: RuntimeConfig | None = None
     try:
+        cfg = load_pinned(wh, settings, run_id)  # pins CONFIG_SNAPSHOTS(run_id); a rerun reuses it
         contract = contract_for(settings)
         validate(wh, contract)
         version, _ = load_promoted(wh, settings)
         active = count_active(wh, settings, contract, as_of_dt)
         features = build_features(wh, settings, contract, as_of_dt, current_status=True)
-        frame = score_frame(wh, settings, features, run_id, as_of_dt)
+        frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
+
 
         with wh.transaction():
             populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)
@@ -88,11 +95,16 @@ def run_cycle(
             scored = exc.scored
         _write_run(wh, ops, **base, status="FAILED", model_version=version, active_in_source=active,
                    scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
-                   error_msg=f"{type(exc).__name__}: {exc}")
+                   error_msg=f"{type(exc).__name__}: {exc}", config_snapshot_id=run_id if cfg else None,
+                   error_class=type(exc).__name__)
         if isinstance(exc, RunFailed):
             raise
         raise RunFailed(f"{type(exc).__name__}: {exc}") from exc
 
-    _write_run(wh, ops, **base, status="SUCCEEDED", model_version=version, active_in_source=active,
-               scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0, error_msg=None)
-    return RunResult(run_id, "SUCCEEDED", as_of_dt, version, active, scored)
+    # Invalid gate thresholds -> approve_all; invalid tiers/guardrails -> agent halts. Either way DEGRADED.
+    status = "DEGRADED" if cfg.degraded else "SUCCEEDED"
+    _write_run(wh, ops, **base, status=status, model_version=version, active_in_source=active,
+               scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
+               error_msg="ConfigError: " + "; ".join(cfg.errors) if cfg.degraded else None,
+               config_snapshot_id=run_id, error_class="ConfigError" if cfg.degraded else None)
+    return RunResult(run_id, status, as_of_dt, version, active, scored, cfg.gate_mode, cfg.agent_halt)
