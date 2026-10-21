@@ -10,3 +10,8 @@
 
 - Wave 2 (T2 synth, T3 contract validation, T6 TreeSHAP) built on the wave 1 skeleton: keep validation in contract/validate.py and extend the contract views additively; check the T3 contract layout notes before touching loader or views.
 - Before opening a MR run `ruff check src tests` and pytest with LD_LIBRARY_PATH=/workspace/runs/.libs (libgomp); the TreeSHAP and LightGBM tests need it, and CI installs libgomp1.
+
+### churn-prediction, wave 4 (2026-10-21)
+
+- T7 (V007) and T10 (V006) both added migrations in the same wave: check the highest existing migration version on main before numbering a new one, and keep migrations additive and insert-only.
+- Open the ticket MR as a draft, then mark it ready with only the plan-doc paths after the operator's manual test; T7 and T10 shipped this way without rework.
