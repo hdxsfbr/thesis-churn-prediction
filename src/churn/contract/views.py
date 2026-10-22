@@ -11,7 +11,7 @@ from collections.abc import Iterable
 
 import pandas as pd
 
-from churn.contract.loader import Column, Contract
+from churn.contract.loader import Column, Contract, ContractError
 from churn.warehouse.base import Warehouse
 
 
@@ -30,6 +30,8 @@ def _utc(col: Column) -> str:
 
 def view_cte(contract: Contract, name: str, pepper: str, include_raw_id: bool = False) -> str:
     view = contract.views[name]
+    if view.pii:
+        raise ContractError(f'PII view {name} cannot be rendered')
     select = []
     if "customer_id" in view.columns:
         # Pseudonymous key (R7.1): downstream tables carry subscriber_key only.
@@ -50,13 +52,13 @@ def contract_ctes(
     contract: Contract, pepper: str, names: Iterable[str] | None = None, include_raw_id: bool = False
 ) -> str:
     """Comma-joined CTE definitions, to be placed after ``WITH``."""
-    names = list(names) if names is not None else list(contract.views)
+    names = list(names) if names is not None else [n for n, v in contract.views.items() if not v.pii]
     return ",\n".join(view_cte(contract, n, pepper, include_raw_id) for n in names)
 
 
 def key_map_frame(wh: Warehouse, contract: Contract, pepper: str) -> pd.DataFrame:
     """Distinct (subscriber_key, customer_id) pairs across every contract view that carries customer_id."""
-    names = [n for n, v in contract.views.items() if "customer_id" in v.columns]
+    names = [n for n, v in contract.views.items() if "customer_id" in v.columns and not v.pii]
     if not names:
         return pd.DataFrame({"subscriber_key": [], "customer_id": []})
     ctes = contract_ctes(contract, pepper, names, include_raw_id=True)

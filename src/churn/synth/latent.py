@@ -1,4 +1,4 @@
-"""Latent-state simulator (thin version).
+"""Latent-state simulator.
 
 Churn hazard is a *latent* variable that emits observable behaviour (longer gaps between orders as
 cancellation nears, discounts, refunds). The pipeline only ever sees the emitted events, through the
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 BASE_MONTHLY_CHURN = 0.035
-INVOLUNTARY_SHARE = 0.15
+PAYMENT_HAZARD_PER_DAY = 0.035 * 0.15 / 30
 WIND_DOWN_DAYS = 75  # order cadence stretches this long before a voluntary cancellation
 REASONS = ["TOO_EXPENSIVE", "NOT_WORKING", "TOO_MANY", "LIFE_CHANGE", "OTHER"]
 PRICES = np.array([29.0, 39.0, 49.0])
@@ -24,10 +24,21 @@ ARCHETYPES = ["price_sensitive", "efficacy_dissatisfied", "fatigued", "life_chan
 ARCHETYPE_SHARES = [0.35, 0.25, 0.25, 0.15]
 ARCHETYPE_REASON = dict(zip(ARCHETYPES, ["TOO_EXPENSIVE", "NOT_WORKING", "TOO_MANY", "LIFE_CHANGE"], strict=True))
 REASON_NOISE = 0.25  # share of cancellations whose reason code is drawn at random, "OTHER" included
-# Wind-down stretch of the order cadence by archetype: fatigued customers taper, life changes stop abruptly.
-STRETCH_SCALE = {"price_sensitive": 1.0, "efficacy_dissatisfied": 1.0, "fatigued": 2.0, "life_change": 0.0}
-DISCOUNT_BOOST = {"price_sensitive": 0.5}
-REFUND_BOOST = {"efficacy_dissatisfied": 0.3}
+# One emission model: each process reads the same customer's archetype parameters.
+EMISSIONS = {
+    'price_sensitive': {'stretch': 1., 'discount': .5, 'refund': .12, 'event': 'modify',
+                        'category': 'billing', 'quiz': .10, 'open': .65, 'sku': 'GUT'},
+    'efficacy_dissatisfied': {'stretch': 1., 'discount': 0., 'refund': .3, 'event': 'blend_switch',
+                             'category': 'product_not_working', 'quiz': .65, 'open': .65, 'sku': 'FOCUS'},
+    'fatigued': {'stretch': 2., 'discount': 0., 'refund': 0., 'event': 'skip',
+                'category': 'delivery_frequency', 'quiz': .06, 'open': .45, 'sku': 'CALM'},
+    'life_change': {'stretch': 0., 'discount': 0., 'refund': 0., 'event': 'pause',
+                   'category': 'address_change', 'quiz': .06, 'open': .65, 'sku': 'ENERGY'},
+}
+
+
+def emission(archetypes: np.ndarray, key: str) -> np.ndarray:
+    return np.array([EMISSIONS[a][key] for a in archetypes])
 
 
 def draw_archetypes(seed: int, n: int) -> np.ndarray:
@@ -67,7 +78,9 @@ def draw_cancellation(rng: np.random.Generator, traits: Traits, start_day: np.nd
     """Latent days-to-cancel after start, whether it is voluntary, and the reason code."""
     n = len(start_day)
     days_to_cancel = rng.exponential(1.0 / traits.hazard_per_day)
-    voluntary = rng.random(n) >= INVOLUNTARY_SHARE
+    payment_days = rng.exponential(1.0 / PAYMENT_HAZARD_PER_DAY, n)
+    voluntary = days_to_cancel < payment_days
+    days_to_cancel = np.minimum(days_to_cancel, payment_days)
     reason = rng.choice(REASONS, n, p=[0.35, 0.25, 0.15, 0.1, 0.15])
     return days_to_cancel, voluntary, reason
 
