@@ -18,6 +18,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from churn.agent.policy import PolicyConfig
 from churn.settings import Settings, config_dir
 from churn.warehouse.base import Warehouse
 
@@ -86,6 +87,7 @@ SECTIONS: dict[str, tuple[type[BaseModel], Literal["approve_all", "halt"]]] = {
     "guardrails": (GuardrailConfig, "halt"),
     "holdout": (HoldoutConfig, "halt"),
     "outcomes": (OutcomesConfig, "halt"),
+    "policy": (PolicyConfig, "halt"),
 }
 
 
@@ -97,6 +99,7 @@ class RuntimeConfig(BaseModel):
     guardrails: GuardrailConfig | None = None
     holdout: HoldoutConfig | None = None
     outcomes: OutcomesConfig | None = None
+    policy: PolicyConfig | None = None
     gate_mode: Literal["normal", "approve_all"] = "approve_all"
     agent_halt: bool = True
     errors: list[str] = Field(default_factory=list)

@@ -9,6 +9,7 @@ from datetime import date
 
 import pandas as pd
 
+from churn.interventions.base import load_registry
 from churn.orchestration.runner import run_cycle
 
 AS_OF = date(2025, 6, 30)
@@ -43,7 +44,7 @@ def test_at_risk_subscriber_gets_one_outbox_row_and_log_row(pipeline):
     assert len(log) == len(at_risk)
     assert log["decision_id"].is_unique
     assert set(log["subscriber_key"]) == set(at_risk["subscriber_key"])
-    assert (log["intervention_type"] == "checkin_email").all()
+    assert log['intervention_type'].isin(load_registry()).all()
     for key, did in zip(log["subscriber_key"], log["decision_id"], strict=True):
         assert did == hashlib.sha256(f"t-agent-1|{key}".encode()).hexdigest()
 
@@ -53,7 +54,8 @@ def test_at_risk_subscriber_gets_one_outbox_row_and_log_row(pipeline):
     )
     auto = _auto(log)
     assert len(auto) > 0
-    assert (auto["tier"].notna()).all() and (auto["risk"] < 0.85).all()
+    assert auto['tier'].notna().all()
+    assert ((auto['risk'] < 0.85) | (auto['intervention_type'] == 'escalation')).all()
     assert len(out) == len(auto)
     assert out["outbox_id"].is_unique
     assert set(out["outbox_id"]) == set(auto["decision_id"])
@@ -81,9 +83,9 @@ def test_log_row_has_all_r6_1_fields_or_pending(pipeline):
     assert (log["response"] == "PENDING").all()
     assert (log["outcome"] == "PENDING").all()
     assert log["content_source"].isin(["template", "llm"]).all()
-    for raw in log["rationale"]:
+    for raw, chosen in zip(log['rationale'], log['intervention_type'], strict=True):
         r = json.loads(raw)
-        assert r["chosen"] == "checkin_email"
+        assert r['chosen'] == chosen
         assert "top_factors" in r
     for raw in log["top_factors"]:
         assert isinstance(json.loads(raw), list)
@@ -104,10 +106,10 @@ def test_outbox_row_contains_everything_sender_needs(pipeline):
     assert len(out) == len(_auto(log)) > 0
     keys = dict(zip(log["decision_id"], log["subscriber_key"], strict=True))
     for _, row in out.iterrows():
-        assert row["channel"] == "email"
-        assert row["intervention_type"] == "checkin_email"
+        assert row['channel'] == load_registry()[row['intervention_type']].channel
         assert row["subject"].strip()
-        assert "{{first_name}}" in row["body"]
+        token = '{{first_name}}' if row['channel'] == 'email' else '{{subscriber_key}}'
+        assert token in row['body']
         assert row["subscriber_key"] == keys[row["outbox_id"]]
         assert row["status"] == "READY"
         assert pd.notna(row["created_at"])
