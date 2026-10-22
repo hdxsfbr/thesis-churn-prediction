@@ -2,6 +2,8 @@
 
 Source of truth: `docs/PRD.md` (Thesis partner brief, Version 1). This document keeps every requirement of that brief, turns each into a testable requirement, and records the decisions the operator (Andre) made on the points the brief left open. Where this document and `docs/PRD.md` seem to differ, `docs/PRD.md` wins unless a recorded decision below says otherwise.
 
+**Revision 2 (2026-10-21, change request during the build).** Three problems found while building waves 1–5 are fixed here: the R3.6 precision target was mathematically unreachable (D4–D7, R3.6 rewritten), the full synthetic source delivered under R1.1/R1.2 is no longer on main (R1.7 added), and the source contract maps only two of the eight views, so four feature domains run on stub defaults (R1.6 added). R3.8 adds a re-evaluation on the restored data. Every other requirement is unchanged. See §9 for the change log.
+
 ## 1. Problem
 
 Thesis has no unified way to predict which subscribers are about to cancel, and no automated response when they are. Churn signals sit in separate Snowflake views (subscriptions and orders, Klaviyo email engagement, Zendesk support, quiz responses) with no predictive layer joining them. Retention is entirely reactive. Every lost subscriber costs a full acquisition to replace, and a 2–3 percentage point drop in monthly churn would change LTV materially.
@@ -42,6 +44,15 @@ Thesis has no unified way to predict which subscribers are about to cancel, and 
 - **D2. Intervention execution:** "Write to a Snowflake outbox table only (downstream tool sends later)"
 - **D3. Human approval surface:** "Edit a Snowflake approval table (e.g., via Metabase)"
 
+Revision 2 decisions. Andre delegated the first four in the change request; they are recorded in its words. D7–D9 are his answers to this step's questions.
+
+- **D4. Churn label kept:** "keep label A1 (30-day voluntary churn) unchanged, and replace the precision target with targets that are achievable and still meaningful: (a) precision in the top 2% of risk scores > 0.50, and (b) top-decile lift >= 4x the base rate."
+- **D5. Recall target kept, boundary from validation:** "Keep pre-cancellation recall > 0.60, measured at the at-risk tier boundary, and choose that boundary on a validation split (not the holdout) rather than the fixed 0.20; report the precision obtained at that boundary."
+- **D6. Rebuild the lost synthetic source:** T2's full synthetic source "was merged as MR !5 but its code is NOT on main today"; a new ticket "rebuilds T2's full synthetic source on top of current main (TASKS.md T2 slice is the spec), reconciles it with T7's interim latent archetype (keep the latent_archetypes() interface T7 uses; replace the interim model with the full one), uses the next free migration number instead of V002 if V002 is now taken, and re-checks T7's test_archetype_beats_chance_on_latent_truth. Mark T2 in the plan as superseded by the new ticket." The source contract must also map "all contract views (subscriptions, orders, subscription_events, products, email_events, support_tickets, quiz_responses, customers_pii) … for the synthetic schema, with a test that every T4 feature domain is populated (has_<domain> = 1) on synthetic data." Afterwards "the T8 evaluation is rerun on the full synthetic data with all views mapped, and the eval report and model card regenerated."
+- **D7. Boundary rule:** "Highest boundary with validation recall >= 0.65 (safety margin)"
+- **D8. Boundary use:** "Evaluation only; report it as a recommended value, runtime tiers unchanged"
+- **D9. Re-evaluation outcome:** "Done with an honest MISS and stated reason"
+
 Note on D1 and brief §11 ("do not ship demo-quality output that only works on synthetic or sampled data"): these are reconciled by requiring that nothing in the system depends on the data being synthetic. The synthetic schema mirrors the assumed real views, the generator produces data at full production scale with realistic edge cases, and the swap to real views changes configuration and view mappings only (R1.3, R1.4).
 
 ## 6. Requirements
@@ -60,6 +71,10 @@ Each requirement has an acceptance criterion (AC). "Snowflake" means the build's
   *AC:* The deployment guide has a "switch to production views" section that names each contract item and the steps to follow. No code change appears in those steps.
 - **R1.5 Warehouse first.** All reads come from Snowflake and all outputs are written to Snowflake.
   *AC:* The code has no outbound calls to Shopify, Klaviyo or Zendesk APIs. Scores, archetypes, interventions, approvals and outcomes are all Snowflake tables.
+- **R1.6 Every contract view mapped (Revision 2, D6).** The source contract configured for the synthetic schema maps all eight contract views: subscriptions, orders, subscription_events, products, email_events, support_tickets, quiz_responses and customers_pii. No feature domain runs on stub defaults in the real pipeline when the source has the data. customers_pii stays declared PII and is never selected by pipeline feature, prompt or log code (R7.1).
+  *AC:* (a) Contract validation at cycle start passes with all eight views mapped to the synthetic schema. (b) An automated test generates synthetic data, builds features through the configured contract (not through stubs), and shows that for every feature domain with a `has_<domain>` indicator (email, subscription events, support, quiz and any other domain the feature catalogue flags) at least one scored subscriber has `has_<domain> = 1`. (c) The existing test that customers_pii is never read by pipeline code still passes.
+- **R1.7 Full synthetic source restored on main (Revision 2, D6).** The full synthetic source that R1.1 and R1.2 require (all eight views, latent archetypes with latent truth, noisy reason codes, independent involuntary churn, the edge-case categories, the data profile command and its stored profile and report) is present on main again. It is rebuilt on top of the current code rather than restored over it, so later work is not lost. It replaces the interim latent archetype model added with the archetype classifier while keeping the interface the archetype classifier and its tests use to read the latent archetype. Stored-schema changes take the next free migration number. The original delivery (T2) is marked superseded in the plan; no other merged ticket's scope changes.
+  *AC:* (a) On main, every R1.1 and R1.2 acceptance criterion passes again, including the T2 acceptance tests named in the plan (every domain has a populated view, edge-case shares above 0%, churn events spanning the label and holdout window, determinism for a seed, reason codes following the latent archetype with about 25% noise, synthetic code not importing features or model). (b) The archetype classifier's test that per-archetype precision against latent truth beats chance (above 0.25) passes against the full latent model, unchanged. (c) The full test suite passes with no migration number reused. (d) The plan documents show T2 as superseded by the new ticket.
 
 ### R2. Feature engineering
 
@@ -84,10 +99,18 @@ Each requirement has an acceptance criterion (AC). "Snowflake" means the build's
   *AC:* Changing a tier boundary in configuration changes the tier assignment on the next run, with no code change.
 - **R3.5 Write-back.** Scores, factors, archetype, tier, model version and run identifier are written to Snowflake for each run, and history is kept.
   *AC:* A Metabase-style SQL query can return the score history of one subscriber across runs.
-- **R3.6 Accuracy.** Measured against historical churn with the agreed label and window (OQ1): top-risk-decile precision above 70% and pre-cancellation recall above 60%.
-  *AC:* An evaluation report from a held-out time period shows both metrics, the label definition and the window. If a target is missed, the report says so and gives the reason; it does not hide the miss.
+- **R3.6 Accuracy (amended in Revision 2, D4, D5, D7, D8).** Measured against historical churn with the label unchanged (30-day voluntary churn, A1) on the held-out final time period, the model meets three targets:
+  1. precision among the top 2% of risk scores above 0.50;
+  2. top-decile lift of at least 4× the base rate (top-decile precision divided by the holdout base rate);
+  3. pre-cancellation recall above 0.60, measured at the at-risk boundary chosen on a validation split that does not overlap the holdout. The boundary is the highest score threshold whose recall on the validation split is at least 0.65 (D7). The precision at that boundary on the holdout is reported, with no target.
+
+  The boundary is used only for evaluation: it is reported as a recommended at-risk boundary, and the runtime risk tiers (R3.4) are not changed by it (D8).
+  *Why the old target was replaced:* the brief's "top-decile precision above 70%" cannot be met under this label. With a base rate of about 3.1%, a perfect model's top decile holds at most all churners, so its precision is at most 3.1% / 10% = 0.31, a lift of 10×. The new targets have reachable ceilings: the top 2% is smaller than the churner share, so a perfect model reaches precision 1.0 there; 4× lift equals a top-decile precision of about 0.124 at a 3.1% base rate, against a 10× ceiling. The earlier evaluation (T8, MR !18) measured top-decile precision 0.17 and recall 0.40 at the fixed 0.20 boundary and reported an honest MISS.
+  *AC:* The evaluation report and model card, built from the held-out period, show: the label definition, label window, holdout period and validation period; the holdout base rate; top-2% precision, top-decile precision and top-decile lift; the validation-chosen boundary, the validation recall that selected it, and the holdout recall and precision at that boundary; and a PASS or MISS line for each of the three targets, where every MISS gives its reason. The ceiling arithmetic above, computed from the measured base rate, appears in the report. The report states that accuracy on synthetic data is not real-world accuracy, and that the 90-day impact target (R6.6) can only be checked after go-live. Unit tests check each metric on a hand-built fixture with a known value, check that the boundary is chosen from validation data only (changing holdout data does not move it), and check that a missed target is printed as MISS with a reason.
 - **R3.7 Scheduled or continuous operation.** The scoring pipeline runs automatically on a schedule (cadence OQ4) or continuously, and feeds the agent directly. It is not a one-off batch report or CSV.
   *AC:* Two consecutive scheduled runs happen without manual action, and the agent consumes each run's output.
+- **R3.8 Re-evaluation on the full synthetic data (Revision 2, D6, D9).** After R1.6 and R1.7 are met, the R3.6 evaluation is rerun on the full synthetic data with every contract view mapped, and the evaluation report and model card are regenerated from that run.
+  *AC:* The regenerated report and model card state that they come from the full synthetic source with all eight views mapped, use a synthetic dataset at least as large as the one behind the earlier T8 report, and show every R3.6 metric and PASS/MISS line. The feature summary in the report shows every feature domain populated (R1.6). A target still missed on this run is acceptable when it is reported as MISS with its reason (D9).
 
 ### R4. Intervention agent
 
@@ -178,12 +201,16 @@ Each requirement has an acceptance criterion (AC). "Snowflake" means the build's
 - Threshold configuration missing or invalid. The system must fail safe (route to approval or halt) rather than act autonomously.
 - Model retraining produces a worse model (not promoted).
 - Archetype confidence low or tied. Handling must be defined, e.g. escalate or pick the safest intervention.
+- (Revision 2) No score threshold reaches 0.65 recall on the validation split, or the validation split holds too few churners to choose one. The report must say so and print the recall target as MISS with that reason, not fall back to the holdout or to the fixed runtime boundary silently.
+- (Revision 2) The top 2% of the holdout holds very few subscribers (small synthetic runs). The report shows the count behind each precision figure so a small-sample result is visible.
+- (Revision 2) The holdout base rate differs from the 3.1% assumed here. The ceiling arithmetic is computed from the measured rate, not hard-coded.
+- (Revision 2) Rebuilding the synthetic source changes the latent model that the archetype classifier was tested against. Its latent-truth test must still pass without loosening its threshold.
 
 ## 8. Open questions
 
 The three questions allowed this step were used for D1–D3. The points below are still unresolved and need the operator before or during architecture. Where a requirement depends on one, it refers to its OQ number.
 
-- **OQ1. Churn label and evaluation window:** What counts as churn (e.g. voluntary cancellation within N days of the scoring date; are payment failures, pauses or skips included?) and which window and holdout period apply to precision/recall?
+- **OQ1. Churn label and evaluation window:** What counts as churn (e.g. voluntary cancellation within N days of the scoring date; are payment failures, pauses or skips included?) and which window and holdout period apply to precision/recall? *Revision 2:* Andre kept ARCHITECTURE A1 (30-day voluntary churn, 3-month time holdout) as the label (D4); the precision/recall targets that use it are now set by R3.6.
 - **OQ2. Active subscriber definition:** Do paused subscriptions or subscriptions with failed payments count as "active" for scoring?
 - **OQ3. Archetype ground truth:** No archetype labels exist. Should archetypes come from cancellation reasons/support text (e.g. LLM-derived weak labels), from heuristic rules over features, or from something else? How should archetype accuracy be judged?
 - **OQ4. Cadence and deployment:** What scoring/agent cadence (daily batch, hourly, continuous)? Which deployment target for this build (local Docker Compose, or a specific cloud)?
@@ -193,3 +220,7 @@ The three questions allowed this step were used for D1–D3. The points below ar
 - **OQ8. LLM provider and PII policy:** Anthropic Claude or OpenAI? May subscriber first names or other identifying data be sent to the LLM for personalisation, or should identifying fields only be merged downstream?
 - **OQ9. Submission deliverables:** Should the build produce the demo video script/recording and the AI usage log, or does Andre produce these himself?
 - **OQ10. Snowflake environment:** Which account, warehouse, database and role will the build use to create the synthetic schema and output tables, and who provides the credentials?
+
+## 9. Change log
+
+- **Revision 2 (2026-10-21).** R3.6 rewritten (top-2% precision > 0.50, top-decile lift ≥ 4×, pre-cancellation recall > 0.60 at a validation-chosen boundary, ceiling arithmetic). R1.6 (all eight contract views mapped, every feature domain populated), R1.7 (full synthetic source restored on main, T2 superseded) and R3.8 (re-evaluation and regenerated report and model card) added. Decisions D4–D9 and four edge cases added; OQ1 annotated. No other requirement, number or acceptance criterion changed. Plan constraints from the change request: the new work goes in the next wave to be built (waves 1–4 shipped; wave 5 with T8, T9, T11 and T14 is in progress), the re-evaluation comes after it, wave numbering stays consistent with what shipped, and the wave count stays within the platform limit.

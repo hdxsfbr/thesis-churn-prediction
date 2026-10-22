@@ -1,6 +1,15 @@
 # Waves: Churn Prediction & Intervention Agent
 
-Input: `docs/plans/churn-prediction/TASKS.md` (tickets T1–T28). A wave is built in parallel, and the next wave starts once the previous one is merged.
+Input: `docs/plans/churn-prediction/TASKS.md` (tickets T1–T30). A wave is built in parallel, and the next wave starts once the previous one is merged.
+
+**Revision 2 (2026-10-21, change request during wave 5).** What changed in this file:
+- Waves 1–4 are finished and keep their numbers and tickets. T2 stays in wave 2 as the record of MR !5; it is superseded by T29 and not rebuilt.
+- **T8** (amended, MR !18 in progress) stays in wave 5, the current wave. T9, T11 and T14 stay in wave 5.
+- **T29** (new) goes in wave 6. T27 (wave 7, quiz rows at full scale) and T16 (wave 8, reads `email_events` and redemptions through the contract) need all eight views mapped, so T29 has to come before them. T29 shares `src/churn/cli.py` with T8 (wave 5), T24 (wave 6) and T27 (wave 7).
+- **T24** moves from wave 6 to wave 10 to make room for T29. The operator chose this on 2026-10-21. Only T23 (wave 14) depends on T24, so it still comes first. In wave 10 T24 shares no file with T19.
+- **T30** (new) goes in wave 7. It needs T8 (wave 5) and T29 (wave 6), and its files are separate from those of T12, T15, T26 and T27.
+- No other ticket moves, and the number of waves stays at 15.
+- T27 (wave 7) changes `synth/generator.py` after T29 has rebuilt it, so T27 adds chunking to the full generator and not to the interim one.
 
 Rules this plan follows:
 - Every ticket is in exactly one wave, and waves are numbered 1–15 with no gaps.
@@ -18,11 +27,11 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 | 3 | T4, T5 | Full feature catalogue; the runtime config table drives risk tiers |
 | 4 | T7, T10 | Archetype classifier; agent thin path to OUTBOX and INTERVENTION_LOG |
 | 5 | T8, T9, T11, T14 | Evaluation report, logging and error taxonomy, all four intervention paths, approval gate |
-| 6 | T13, T24 | Contextual Thompson-sampling policy; Snowflake backend and bootstrap |
-| 7 | T12, T15, T26, T27 | Guardrails, LLM content with fallback, extensibility, full-scale throughput |
+| 6 | T13, T29 | Contextual Thompson-sampling policy; full synthetic source with all eight contract views mapped (supersedes T2) |
+| 7 | T12, T15, T26, T27, T30 | Guardrails, LLM content with fallback, extensibility, full-scale throughput, re-evaluation on the full data |
 | 8 | T16, T25 | Holdout, simulated responses, outcome tracking; PII proof |
 | 9 | T17, T18 | Feedback loops into selection (posteriors) and scoring (retrain) |
-| 10 | T19 | Run metrics and the evaluation run |
+| 10 | T19, T24 | Run metrics and the evaluation run; Snowflake backend and bootstrap |
 | 11 | T20 | Failure recovery: checkpoints, run lock, fault injection |
 | 12 | T21 | FastAPI service |
 | 13 | T22 | Scheduled worker |
@@ -76,7 +85,7 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 **Tickets:** T8, T9, T11, T14
 
 **Goal:**
-- T8: the honest evaluation report and model card (needs T7 for per-archetype metrics).
+- T8 (amended in Revision 2): the honest evaluation report and model card against the new R3.6 targets. The boundary is chosen on a validation split and the report shows ceilings from the measured base rate. It needs T7 for per-archetype metrics.
 - T9: structured logging and the error taxonomy in the runner.
 - T11: the formulation, retention-offer and escalation paths (needs T10 and T4's `has_quiz`).
 - T14: the threshold gate and the approval table lifecycle (needs T10 and T5's snapshot).
@@ -87,38 +96,40 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 - T11: new intervention modules, `interventions.yaml`, `agent/content.py`
 - T14: `agent/gate.py`, `execution/approvals.py`, `agent/cycle.py`, V009
 
-## Wave 6 — context-aware selection and Snowflake
+## Wave 6 — context-aware selection and the full synthetic source
 
-**Tickets:** T13, T24
+**Tickets:** T13, T29
 
 **Goal:**
 - T13: replaces the deterministic choice with the contextual Thompson-sampling policy and per-decision rationale. It needs T7, T10 and T11.
-- T24: the Snowflake backend, bootstrap of schemas and roles, the `OUTBOX_FOR_SENDER` view (needs T10's OUTBOX) and the SQL portability test.
+- T29 (new in Revision 2): rebuilds T2's full synthetic source on current main. It keeps T7's `latent_archetypes()` interface and RNG streams, adds `latent_truth`, noisy reason codes, involuntary churn and edge cases, and maps all eight contract views (`customers_pii` flagged pii). It needs T3, T4 and T7, which are all merged. It comes before T27 and T16, which need the full views.
 
-**Why parallel:** T13 touches `agent/` (`policy.py`, `rationale.py`, `cycle.py`), V008 and `runtime_defaults.yaml`. T24 touches the warehouse, bootstrap SQL, V013, `pyproject.toml` and `cli.py`. No file overlaps.
+**Why parallel:** T13 touches `agent/` (`policy.py`, `rationale.py`, `cycle.py`), V008 and `runtime_defaults.yaml`. T29 touches `synth/`, `contract/loader.py`, `contract/views.py`, `source_contract.yaml`, `cli.py`, synth/V003, V015, its docs and tests, and `tickets/T29.md`. No file overlaps. T29 cannot go in wave 5 because T8 also changes `cli.py`. T24 was in this wave and also changes `cli.py`, so it moved to wave 10.
 
-## Wave 7 — guardrails, LLM content, extensibility, scale
+## Wave 7 — guardrails, LLM content, extensibility, scale, re-evaluation
 
-**Tickets:** T12, T15, T26, T27
+**Tickets:** T12, T15, T26, T27, T30
 
 **Goal:**
 - T12: guardrails and coverage gaps. It comes after T14 because the duplicate-pending rule reads APPROVALS.
 - T15: LLM-personalised content behind a PII-free prompt, with template fallback for all four types from T11.
 - T26: interventions loaded by dotted path, plus the module-boundary test (needs T13's priors for the dummy arm).
-- T27: full-scale data and a timed cycle.
+- T27: full-scale data and a timed cycle. It adds chunking to the full generator that T29 rebuilt in wave 6, so the full-scale quiz volumes exist.
+- T30 (new in Revision 2): reruns the evaluation on the full synthetic data with every view mapped, adds data provenance and domain coverage to the report, and commits the regenerated eval report and model card. It needs T8 (wave 5) and T29 (wave 6).
 
 **Why parallel:** the file sets are disjoint:
 - T12: `agent/guardrails.py`, `agent/cycle.py`, V007
 - T15: `llm/`, `agent/content.py`, `pyproject.toml`, `config/settings.yaml`
 - T26: `interventions/base.py`, the test fixture, `docs/extending.md`
 - T27: `synth/generator.py`, `cli.py`
+- T30: `model/evaluate.py`, `docs/eval-report.md`, `docs/model-card.md`, `test_eval_full_source.py`, `tickets/T30.md`
 
 ## Wave 8 — outcomes and PII proof
 
 **Tickets:** T16, T25
 
 **Goal:**
-- T16: the holdout, simulated responses, outcome closing after 30 days, `churn simulate` and the treated-vs-control report.
+- T16: the holdout, simulated responses, outcome closing after 30 days, `churn simulate` and the treated-vs-control report. It reads `email_events` and redemptions through the contract views that T29 mapped in wave 6.
 - T25: log redaction and a full-cycle PII scan. The scan covers APPROVALS (T14) and the LLM prompts (T15), so it waits for both.
 
 **Why parallel:** T16 touches `feedback/`, `synth/responder.py`, `agent/cycle.py`, `runner.py`, `cli.py`, V010 and `impact.sql`. T25 touches only `obs/logging.py` and its own tests.
@@ -135,13 +146,15 @@ Both need T16's outcomes.
 
 **Why parallel:** T17 touches `feedback/policy_stats.py` and `runner.py`. T18 touches `feedback/retrain.py`, `model/registry.py`, `model/dataset.py`, `features/registry.py`, `interventions.sql` and `cli.py`. No file overlaps.
 
-## Wave 10 — run metrics
+## Wave 10 — run metrics and Snowflake
 
-**Tickets:** T19
+**Tickets:** T19, T24
 
-**Goal:** coverage, autonomy rate, audit completeness, LLM usage and treated-vs-control churn for each run, plus the 45-day evaluation run. It needs the holdout (T16), approvals (T14), coverage gaps (T12) and LLM fallbacks (T15).
+**Goal:**
+- T19: coverage, autonomy rate, audit completeness, LLM usage and treated-vs-control churn for each run, plus the 45-day evaluation run. It needs the holdout (T16), approvals (T14), coverage gaps (T12) and LLM fallbacks (T15).
+- T24 (moved from wave 6 in Revision 2): the Snowflake backend, bootstrap of schemas and roles, the `OUTBOX_FOR_SENDER` view (needs T10's OUTBOX) and the SQL portability test. By this wave the test also covers every SQL file added up to wave 9. Its migration keeps the number V013. The runner applies versions it has not seen yet, so landing V013 after V015 is fine.
 
-**Why alone:** it changes `runner.py`, which T17 changes in wave 9 and T20 in wave 11.
+**Why parallel:** T19 touches `feedback/metrics.py`, V011, `runner.py` and its tests. T24 touches the warehouse, bootstrap SQL, V013, `pyproject.toml`, `cli.py` and its tests. No file overlaps. `runner.py` keeps T19 apart from T17 (wave 9) and T20 (wave 11). `cli.py` and `pyproject.toml` keep T24 apart from T18 (wave 9) and T21 (wave 12).
 
 ## Wave 11 — failure recovery
 
@@ -171,7 +184,7 @@ Both need T16's outcomes.
 
 **Tickets:** T23
 
-**Goal:** a non-root image for the `api` (T21) and `worker` (T22) services, `.env.example` covering the Snowflake settings (T24), and the deployment guide with the config-only switch to production views. The end-to-end check is done by the operator.
+**Goal:** a non-root image for the `api` (T21) and `worker` (T22) services, `.env.example` covering the Snowflake settings (T24, wave 10), and the deployment guide with the config-only switch to production views. The end-to-end check is done by the operator.
 
 **Why alone:** it needs T21, T22 and T24 merged. T28 checks that `docs/deployment.md` exists, so T28 must come after it.
 

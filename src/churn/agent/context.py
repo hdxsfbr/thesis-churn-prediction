@@ -23,6 +23,21 @@ class AgentContext:
     top_factors: list[dict] = field(default_factory=list)
     archetype: str = PENDING  # no archetype is scored yet; filled in by the archetype ticket
     archetype_conf: float | None = None
+    # Profile signals used by the intervention types (additive; defaults mean unknown).
+    has_quiz: bool = False
+    quiz_goals: list[str] = field(default_factory=list)
+    recommended_sku: str | None = None
+    top_blend_goal: str | None = None  # goal category of the most-reordered blend
+    goal_email_engagement: float | None = None  # engagement with goal-specific emails, 0..1
+    # Defaults below mirror config/runtime_defaults.yaml (A6 guardrails).
+    max_discount_pct: float = 25.0  # A6 guardrail
+    offer_catalogue: tuple[str, ...] = (
+        "FREE_SHIPPING",
+        "PCT_10_NEXT",
+        "PCT_20_NEXT",
+        "PCT_25_NEXT_2",
+        "FREE_SAMPLE_BLEND",
+    )
 
     @property
     def factor_labels(self) -> list[str]:

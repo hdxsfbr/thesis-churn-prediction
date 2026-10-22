@@ -1,93 +1,187 @@
 # thesis-churn-prediction
 
+Churn prediction and intervention agent for subscribers of [Thesis](https://takethesis.com). It scores every
+active subscriber every day, explains each score, classifies the likely reason for leaving, and decides on a
+retention action. The goal, scope and requirements are in [`docs/PRD.md`](docs/PRD.md).
 
+What the finished system does (per the PRD):
+
+- **Daily scoring** of every active subscriber with a calibrated LightGBM model.
+- **Top explaining factors** stored with each score.
+- **Churn archetype classifier**: the reason behind the risk, with a confidence and a low-confidence flag.
+- **Risk tiers** driven by a runtime config table (`CHURN_OPS.AGENT_CONFIG`), editable without a deploy.
+- **Intervention agent** that only writes to a Snowflake outbox table. Nothing is sent directly; a separate
+  sender reads the outbox.
+- **Human approval for high-stakes interventions**, through a Snowflake approval table.
+- Every decision is logged with its full context for audit.
+
+## Current status
+
+The system is built in waves, one ticket per feature slice. The plan is in
+[`docs/plans/churn-prediction/WAVES.md`](docs/plans/churn-prediction/WAVES.md) (15 waves, tickets T1 to T28
+in [`TASKS.md`](docs/plans/churn-prediction/TASKS.md)). The next wave starts once the previous one is merged.
+
+Built on `main` today (requirements traces in
+[`docs/plans/churn-prediction/tickets/`](docs/plans/churn-prediction/tickets/)):
+
+| Ticket | What exists |
+|---|---|
+| T1 | Skeleton: synth, train, score into `CHURN_OPS.RISK_SCORES`, `RUNS` row, warehouse protocol, MERGE writer, migrations |
+| T3 | Source contract: validation, dedup, UTC normalisation, pseudonymous keys, swap by config |
+| T4 | Feature catalogue in SQL (leading indicators, multi-window trends, no leakage, missing-domain handling) |
+| T5 | Runtime config (`AGENT_CONFIG`) driving risk tiers, with fail-safe validation |
+| T6 | Top explaining factors (TreeSHAP) on every score |
+| T7 | Archetype, confidence and low-confidence flag on scores |
+| T10 | Agent thin path: at-risk subscribers get a check-in email row in `OUTBOX` and `INTERVENTION_LOG` |
+
+Wave 2's synthetic data generator (T2) is also in the code, but it has no ticket trace yet.
+
+Planned and **not built yet**: the evaluation report, error taxonomy and structured logging, the other three
+intervention types, the approval gate and approval table, the Thompson-sampling policy, the Snowflake backend
+and bootstrap, guardrails, LLM-written content, outcomes and feedback loops, the API service, the worker and
+deployment. See `WAVES.md` for the order. Only DuckDB is implemented as a warehouse backend today.
+
+**The system currently runs on synthetic data** in its own schema (`THESIS_SYNTH`). It switches to Thesis's real
+views by configuration only, through the source contract (see [Configuration](#configuration)).
+
+## Architecture overview
+
+Package layout under `src/churn/`:
+
+- `settings.py`: settings from `config/settings.yaml` plus environment overrides.
+- `runtime_config.py`: seeds and reads `CHURN_OPS.AGENT_CONFIG` (tiers and other runtime values).
+- `contract/`: loads the source contract, creates one normalised view per logical source view (rename, UTC,
+  dedup, pseudonymous key) and validates the source before each cycle.
+- `features/`: feature registry and SQL builder. The SQL is under `sql/features/`.
+- `synth/`: synthetic subscribers, orders and other source domains, with latent archetypes.
+- `model/`: dataset, training and calibration, scoring, explanations (`explain.py`), archetype classifier
+  (`archetype.py`) and model registry.
+- `agent/`, `interventions/`, `execution/`: decision step (returns decisions, never writes), the intervention
+  registry loaded from `config/interventions.yaml`, and the outbox writer.
+- `orchestration/runner.py`: the daily cycle.
+- `warehouse/`: warehouse protocol, DuckDB implementation, bulk and MERGE writes, and the migration runner.
+- `cli.py`: the `churn` command.
+
+Daily cycle (`churn cycle`):
+
+1. Validate the source contract.
+2. Build features in SQL as of a cutoff date (`as_of`), so no data after the cutoff is used.
+3. Score every active subscriber with the promoted model, adding top factors, archetype and risk tier from the
+   pinned runtime config.
+4. Write `CHURN_OPS.RISK_SCORES` and a `RUNS` row, and fill the `CHURN_PRIVATE.KEY_MAP` table.
+5. Let the agent decide for at-risk subscribers and write `OUTBOX` and `INTERVENTION_LOG` in one transaction.
+   Rows are keyed deterministically, so replaying a run creates no duplicates.
+
+If the runtime config is invalid, the cycle fails safe: an invalid gate config means nothing is dispatched
+(the run is marked `DEGRADED`), and other invalid config halts the agent.
+
+Warehouse targets: DuckDB locally (the default, file `artefacts/local.duckdb`). Snowflake is the production
+target but its backend is not built yet. SQL is written to be portable between the two.
+
+Migrations are `sql/migrations/V###__name.sql`. Each is applied once and its SHA-256 checksum is recorded in
+`CHURN_OPS.SCHEMA_MIGRATIONS`. Editing a shipped migration makes the next run fail with a `MigrationError`, so
+schema changes always go in a new migration with the next version number. Migrations are additive.
 
 ## Getting started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Requirements:
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- Python 3.12 or newer.
+- The system library `libgomp1` (needed by LightGBM). On Debian or Ubuntu: `apt-get install libgomp1`.
 
-## Add your files
+Install, from the repository root:
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://labs.gauntletai.com/andrebatista/thesis-churn-prediction.git
-git branch -M main
-git push -uf origin main
+```bash
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"      # ".[dev]" adds pytest and ruff; use -e . for runtime only
 ```
 
-## Integrate with your tools
+This installs the `churn` command (`churn = churn.cli:app`).
 
-* [Set up project integrations](https://labs.gauntletai.com/andrebatista/thesis-churn-prediction/-/settings/integrations)
+### CLI commands
 
-## Collaborate with your team
+| Command | What it does |
+|---|---|
+| `churn migrate` | Apply pending schema migrations |
+| `churn bootstrap [--reset]` | Migrate, then seed `CHURN_OPS.AGENT_CONFIG` from `config/runtime_defaults.yaml`. Edited rows are kept unless `--reset` is given |
+| `churn synth [--scale tiny\|small\|default]` | Write synthetic subscriptions and orders (and the other source domains) into `THESIS_SYNTH` |
+| `churn train [--as-of YYYY-MM-DD]` | Fit and register a calibrated model on point-in-time snapshots |
+| `churn cycle --as-of YYYY-MM-DD [--run-id ID]` | Score every active subscriber into `CHURN_OPS.RISK_SCORES` and run the agent. The run id defaults to `scheduled-YYYYMMDD` |
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Every command except `migrate` itself also applies pending migrations first. Run `churn --help` for the list.
 
-## Test and Deploy
+### Local end-to-end example (DuckDB)
 
-Use the built-in continuous integration in GitLab.
+```bash
+.venv/bin/churn bootstrap                       # migrate and seed AGENT_CONFIG
+.venv/bin/churn synth --scale tiny              # 1,500 synthetic subscriptions
+.venv/bin/churn train --as-of 2025-05-31        # fit, calibrate and promote a model
+.venv/bin/churn cycle --as-of 2025-06-30        # score and write to CHURN_OPS
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+The cycle prints `scheduled-20250630: scored N of M active subscribers`. The results are in the DuckDB file
+`artefacts/local.duckdb` (for example `CHURN_OPS.RISK_SCORES`, `CHURN_OPS.RUNS`, `CHURN_OPS.OUTBOX`).
+The synthetic data ends on 2025-06-30, so a training date earlier than that leaves room for labels.
 
-***
+## Configuration
 
-# Editing this README
+Settings live in `config/settings.yaml` (backend, DuckDB path, schema names, scoring statuses, label horizon,
+synth scales, model and LightGBM parameters). Environment variables:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+| Variable | Effect |
+|---|---|
+| `CHURN_CONFIG_DIR` | Directory holding the config files (default: `config/` in the repo) |
+| `CHURN_DUCKDB_PATH` | DuckDB file path (overrides `warehouse.path`) |
+| `CHURN_CONTRACT_PATH` | Source contract file (overrides `contract_path`) |
+| `CHURN_KEY_PEPPER` | Secret pepper for the pseudonymous key. Env only, never in the repo. Defaults to a non-secret dev value, so **set it for any real data** |
 
-## Suggestions for a good README
+**Source contract**: `config/source_contract.yaml` maps each logical view (subscriptions, orders and the other
+domains) to a physical object and its columns, with a dedup key and `loaded_at` column. Pointing the pipeline at
+Thesis's real views means editing this file only. Format, validation and logical columns:
+[`docs/data-contract.md`](docs/data-contract.md).
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**Runtime defaults / AGENT_CONFIG**: `config/runtime_defaults.yaml` holds the seed values for
+`CHURN_OPS.AGENT_CONFIG`: risk tier boundaries (medium 0.20, high 0.45, critical 0.70) and which tiers count as
+at-risk, plus approval gate, guardrail, holdout and outcome keys. Today the tier keys drive the cycle; the other
+keys are seeded for later tickets. After `churn bootstrap` the table is the source of truth. Each run pins a
+snapshot of it, so a change takes effect on the next run.
 
-## Name
-Choose a self-explaining name for your project.
+Other config files: `config/archetype_labels.yaml` (weak labels for the archetype classifier) and
+`config/interventions.yaml` (enabled intervention types, currently the check-in email).
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## Testing and CI
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+.venv/bin/ruff check src tests
+.venv/bin/pytest
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Tests are under `tests/unit` and `tests/integration` and run on DuckDB with synthetic data. By default pytest
+skips tests marked `slow`, `scale` and `snowflake` (the last needs a live Snowflake account). LightGBM and
+TreeSHAP tests need `libgomp1`.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+`.gitlab-ci.yml` uses `python:3.12-slim`, installs `libgomp1` and `pip install -e ".[dev]"`, then runs two stages:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+1. `lint`: `ruff check src tests`
+2. `test`: `python -m pytest --junitxml=junit.xml` (JUnit report kept as an artifact)
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## Data and privacy
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+- **Synthetic data only for now.** No real Thesis data is used by this repository.
+- Subscribers are identified by a **pseudonymous key**: `subscriber_key = SHA2(pepper || customer_id, 256)`.
+- The raw `customer_id` is **hidden by default**: the contract views do not expose it, and no `CHURN_OPS` table
+  has a `customer_id` column.
+- The only table with the raw id is `CHURN_PRIVATE.KEY_MAP(subscriber_key, customer_id)`. In Snowflake, grant that
+  schema to the sender and app roles only.
+- Outbox rows carry merge tokens such as `{{first_name}}`, not names or email addresses. The sender fills them
+  in.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## Documentation
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- [Product requirements (`docs/PRD.md`)](docs/PRD.md)
+- Plan: [PRD](docs/plans/churn-prediction/PRD.md), [ARCHITECTURE](docs/plans/churn-prediction/ARCHITECTURE.md),
+  [TASKS](docs/plans/churn-prediction/TASKS.md), [WAVES](docs/plans/churn-prediction/WAVES.md) and
+  [ticket traces](docs/plans/churn-prediction/tickets/)
+- [Source data contract](docs/data-contract.md)
+- [Feature catalogue](docs/features.md)
+- [`CLAUDE.md`](CLAUDE.md): lessons for contributors and agents working in this repository

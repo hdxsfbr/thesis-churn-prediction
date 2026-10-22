@@ -27,7 +27,7 @@ def test_log_lines_parse_as_json_with_run_id_and_component():
         assert rec["component"] == "runner"
         assert rec["step"] == "score"
         assert rec["level"] and rec["event"]
-        assert datetime.fromisoformat(rec["ts"].replace("Z", "+00:00"))
+        assert datetime.fromisoformat(rec["ts"])
     assert first["level"] == "info" and first["rows"] == 3
     assert second["level"] == "error" and second["error_class"] == "ModelError"
 
@@ -48,7 +48,7 @@ def test_iso_dates_pass_through_unchanged():
     rec = json.loads(buf.getvalue().splitlines()[0])
     assert rec["as_of"] == "2025-06-30T00:00:00"
     assert rec["day"] == "2025-06-30"
-    assert datetime.fromisoformat(rec["ts"].replace("Z", "+00:00"))
+    assert datetime.fromisoformat(rec["ts"])
 
 
 def test_unconfigured_get_logger_defaults_to_json_with_redaction(capsys):

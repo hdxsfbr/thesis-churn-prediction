@@ -7,4 +7,7 @@ from churn.interventions.base import Content, InterventionType
 
 
 def build_content(intervention: InterventionType, context: AgentContext) -> Content:
-    return intervention.template(context)
+    content = intervention.template(context)
+    if not content.subject.strip() or not content.body.strip():
+        raise ValueError(f"intervention {intervention.name!r} produced empty content")
+    return content
