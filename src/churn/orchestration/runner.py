@@ -15,6 +15,7 @@ from churn.agent.cycle import run_agent
 from churn.contract.loader import contract_for
 from churn.contract.validate import validate
 from churn.contract.views import populate_key_map
+from churn.execution.approvals import process as process_approvals
 from churn.execution.outbox import dispatch
 from churn.features.builder import as_of_ts, build_features, count_active
 from churn.model.registry import load_promoted
@@ -45,6 +46,7 @@ class RunResult:
     at_risk: int = 0
     decided: int = 0
     dispatched: int = 0
+    queued: int = 0
 
 
 def default_run_id(as_of: date | datetime, kind: str = "scheduled") -> str:
@@ -95,7 +97,7 @@ def run_cycle(
     _write_run(wh, ops, **base, status="RUNNING", model_version=None, active_in_source=None,
                scored=None, ended_at=None, duration_s=None, error_msg=None,
                config_snapshot_id=None, error_class=None,
-               at_risk=None, decided=None, dispatched=None)  # clear counts of an earlier run with this id
+               at_risk=None, decided=None, dispatched=None, queued=None)  # clear counts of an earlier run with this id
 
     log = get_logger("runner", run_id=run_id)
     step = _Steps(log)
@@ -104,7 +106,7 @@ def run_cycle(
     scored: int | None = None
     version: str | None = None
     cfg: RuntimeConfig | None = None
-    at_risk = decided = dispatched = 0
+    at_risk = decided = dispatched = queued = 0
     try:
         with step("config"):
             cfg = load_pinned(wh, settings, run_id)  # pins CONFIG_SNAPSHOTS(run_id); a rerun reuses it
@@ -120,7 +122,7 @@ def run_cycle(
             with step("write_scores"):
                 wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
             scored = 0
-            return _finish(wh, ops, base, t0, log, cfg, version, active, scored, 0, 0, 0)
+            return _finish(wh, ops, base, t0, log, cfg, version, active, scored, 0, 0, 0, 0)
         with step("features"):
             features = build_features(wh, settings, contract, as_of_dt, current_status=True)
         with step("score"):
@@ -138,8 +140,8 @@ def run_cycle(
             if scored != active:  # rolls the scores back
                 raise RunFailed(f"scored {scored} subscribers but {active} are active in the source", scored)
 
-        # Decide and dispatch. Skipped when the agent is halted (invalid tiers/guardrails) or the gate is in
-        # approve_all mode (nothing may reach the outbox without approval; the gate arrives in T14).
+        # Process approver edits, then decide, gate and dispatch. Skipped when the agent is halted (invalid
+        # tiers/guardrails). In approve_all mode (invalid gate) the gate sends every decision to approval.
         # The at-risk count is the coverage denominator, so it is counted whether or not the agent runs.
         # With invalid tiers (cfg.tiers is None) there is no at-risk definition: it stays 0.
         if cfg.tiers is not None:
@@ -149,11 +151,14 @@ def run_cycle(
                 at_risk = int(wh.query(
                     f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r AND tier IN ({marks})", params
                 ).iloc[0]["n"])
-        if not cfg.agent_halt and cfg.gate_mode == "normal":
+        if not cfg.agent_halt:
+            with step("approvals"):
+                process_approvals(wh, settings)
             with step("agent"):
                 decisions = run_agent(wh, settings, run_id, cfg)
                 decided = len(decisions)
-                dispatched = dispatch(wh, settings, decisions)
+                queued = sum(d.needs_approval for d in decisions)
+                dispatched = dispatch(wh, settings, decisions)  # rows written to the outbox
     except Exception as exc:
         error_class = classify(exc)
         hint = runbook_hint(error_class) if error_class == "ModelError" else None
@@ -164,7 +169,7 @@ def run_cycle(
                    scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
                    error_msg=f"{type(exc).__name__}: {exc}" + (f" ({hint})" if hint else ""),
                    config_snapshot_id=run_id if cfg else None, error_class=error_class,
-                   at_risk=at_risk, decided=decided, dispatched=dispatched)
+                   at_risk=at_risk, decided=decided, dispatched=dispatched, queued=queued)
         if isinstance(exc, RunFailed):
             raise
         raise RunFailed(f"{type(exc).__name__}: {exc}" + (f" ({hint})" if hint else "")) from exc
@@ -172,14 +177,14 @@ def run_cycle(
     return _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched)
 
 
-def _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched) -> RunResult:
+def _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched, queued=0) -> RunResult:
     # Invalid gate thresholds -> approve_all; invalid tiers/guardrails -> agent halts. Either way DEGRADED.
     status = "DEGRADED" if cfg.degraded else "SUCCEEDED"
     _write_run(wh, ops, **base, status=status, model_version=version, active_in_source=active,
                scored=scored, ended_at=datetime.now(), duration_s=time.monotonic() - t0,
                error_msg="ConfigError: " + "; ".join(cfg.errors) if cfg.degraded else None,
                config_snapshot_id=base["run_id"], error_class="ConfigError" if cfg.degraded else None,
-               at_risk=at_risk, decided=decided, dispatched=dispatched)
+               at_risk=at_risk, decided=decided, dispatched=dispatched, queued=queued)
     log.info("run_end", status=status, scored=scored, active_in_source=active)
     return RunResult(base["run_id"], status, base["as_of"], version, active, scored, cfg.gate_mode, cfg.agent_halt,
-                     at_risk, decided, dispatched)
+                     at_risk, decided, dispatched, queued)
