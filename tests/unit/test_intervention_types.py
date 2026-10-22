@@ -66,6 +66,13 @@ def test_offer_cap_clips_even_if_catalogue_entry_is_larger():
     assert offer.action(c).discount_pct == 12
 
 
+@pytest.mark.parametrize("code, expected", [("PCT_10_NEXT", 5.0), ("PCT_25_NEXT_2", 25.0)])
+def test_offer_cost_accepts_selected_action(code, expected):
+    offer = load_registry()["retention_offer"]
+    c = ctx(offer_catalogue=(code,))
+    assert offer.cost_usd(offer.action(c)) == offer.cost_usd(c) == expected
+
+
 def test_escalation_body_keeps_merge_token():
     esc = load_registry()["escalation"]
     body = esc.template(ctx(tier="critical", risk=0.9)).body

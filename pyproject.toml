@@ -19,6 +19,7 @@ dependencies = [
   "pydantic>=2.6",
   "pyyaml",
   "typer>=0.12",
+  "structlog>=24",
 ]
 
 [project.optional-dependencies]

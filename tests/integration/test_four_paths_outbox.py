@@ -9,6 +9,8 @@ import pandas as pd
 from churn.agent.content import build_content
 from churn.agent.context import AgentContext
 from churn.agent.cycle import Decision, decision_id
+from churn.contract.loader import contract_for
+from churn.contract.views import contract_ctes
 from churn.execution.outbox import dispatch
 from churn.interventions.base import load_registry
 
@@ -27,9 +29,16 @@ def test_each_type_writes_valid_outbox_row(pipeline):
         "retention_offer": {"max_discount_pct": 20},
         "escalation": {"risk": 0.92, "tier": "critical"},
     }
+    # Real active keys exercise T14 stale-source checks rather than bypassing them.
+    keys = wh.query(
+        f"WITH {contract_ctes(contract_for(settings), settings.key_pepper, ['subscriptions'])} "
+        "SELECT DISTINCT subscriber_key FROM subscriptions "
+        "WHERE status = 'ACTIVE' AND cancelled_at IS NULL ORDER BY subscriber_key LIMIT 4"
+    )["subscriber_key"].tolist()
+    assert len(keys) == 4
     decisions = []
-    for name, extra in profiles.items():
-        kw = {"run_id": "t11-run", "subscriber_key": f"sub-{name}", "risk": 0.6, "tier": "high", "as_of": as_of}
+    for (name, extra), key in zip(profiles.items(), keys, strict=True):
+        kw = {"run_id": "t11-run", "subscriber_key": key, "risk": 0.6, "tier": "high", "as_of": as_of}
         kw.update(extra)
         decisions.append(_decision(name, AgentContext(**kw)))
     assert dispatch(wh, settings, decisions) == 4
