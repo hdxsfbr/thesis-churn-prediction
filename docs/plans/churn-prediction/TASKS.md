@@ -4,7 +4,7 @@ Inputs: `docs/plans/churn-prediction/PRD.md` (requirements R1–R9) and `docs/pl
 
 **Revision 2 (2026-10-21, change request during wave 5).** What changed in this file:
 - **T2** is marked *Superseded by T29*. It was merged as MR !5, but its code is no longer on main. Its slice, files and tests stay below for reference, and T29 is the spec that gets built.
-- **T8** (in progress, MR !18): the slice and acceptance tests are amended for the new R3.6 targets. The label stays A1. The new targets are top-2% precision > 0.50, top-decile lift ≥ 4× and pre-cancellation recall > 0.60 at a boundary chosen on a validation split. The ceiling arithmetic is in ARCHITECTURE A1. The files are unchanged.
+- **T8** (Revision 2 amendment delivered, MR !23): the slice and acceptance tests are amended for the new R3.6 targets. The label stays A1. The new targets are top-2% precision > 0.50, top-decile lift ≥ 4× and pre-cancellation recall > 0.60 at a boundary chosen on a validation split. The ceiling arithmetic is in ARCHITECTURE A1. The files are unchanged.
 - **T29** (new) rebuilds T2's full synthetic source on current main, reconciled with T7's interim `latent_archetypes()`. It uses migrations `synth/V003` and `V015` instead of V002, and maps all eight contract views (R1.6, R1.7).
 - **T30** (new) reruns the T8 evaluation on the full synthetic data with every view mapped, and regenerates the eval report and model card (R3.8).
 - The coverage and shared-files tables are updated. No other ticket changes.
@@ -254,7 +254,7 @@ Conventions for every ticket:
 
 ## T8 — Model evaluation report and model card with honest target check
 
-**Amended in Revision 2** (in progress, MR !18). The label is unchanged (A1, 30-day voluntary churn), and so are the files.
+**Amended in Revision 2** (delivered, MR !23). The label is unchanged (A1, 30-day voluntary churn), and so are the files.
 
 **Slice:**
 - `churn evaluate` splits the monthly snapshots by date into training, a 3-month validation split and the 3-month holdout, and purges snapshots whose label window crosses into the next split (ARCHITECTURE A1, §6.3).
@@ -316,12 +316,18 @@ Conventions for every ticket:
 - `src/churn/orchestration/runner.py`
 - `tests/unit/test_logging.py`
 - `tests/integration/test_error_classification.py`
+- `src/churn/interventions/retention_offer.py` (operator-authorized compatibility repair: selected Action and AgentContext cost callers)
+- `tests/unit/test_intervention_types.py` (action-cost regression)
+- `tests/integration/test_four_paths_outbox.py` (real active pseudonymous subscriber fixture; stale-source protection retained)
 
 **Acceptance tests:**
 - `test_logging.py::test_log_lines_parse_as_json_with_run_id_and_component`
 - `test_error_classification.py::test_missing_model_fails_with_model_error`
 - `test_error_classification.py::test_zero_active_subscribers_succeeds_with_warning`
 - `test_error_classification.py::test_failed_step_records_error_class`
+- `test_error_classification.py::test_success_preserves_queued_counts_and_step_order`: returned RunResult and persisted RUNS queued counts equal approval rows; reconcile → approvals → agent order is preserved.
+- `test_intervention_types.py::test_offer_cost_accepts_selected_action`: selected offer costs and existing context callers remain compatible.
+- `test_four_paths_outbox.py::test_each_type_writes_valid_outbox_row`: all four paths retain payload assertions with real active pseudonymous subscriber keys (operator-authorized repair).
 
 **Covers:** R8.3.
 
