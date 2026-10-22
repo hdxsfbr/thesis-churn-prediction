@@ -745,12 +745,6 @@ def render_model_card(
 ) -> str:
     days = settings.label.horizon_days
     m = r.metrics
-    bd = m["boundary"]
-    boundary = (
-        f"{bd['threshold']:.3f} (recommended only, chosen on validation data)"
-        if bd["threshold"] is not None
-        else "none (" + str(bd["reason"]) + ")"
-    )
     return "\n".join(
         [
             "# Model card: churn risk model",
@@ -778,14 +772,14 @@ def render_model_card(
             f"## Evaluation (holdout {r.holdout_start:%Y-%m-%d} to {r.holdout_end:%Y-%m-%d})",
             "",
             (f"- Splits: training {r.train_start:%Y-%m-%d} to {r.train_end:%Y-%m-%d}; validation "
-            f"{r.validation_start:%Y-%m-%d} to {r.validation_end:%Y-%m-%d} ({validation_months} months, boundary "
-            f"selection only); holdout the last {holdout_months} months. Synthetic scale: "
+            f"{r.validation_start:%Y-%m-%d} to {r.validation_end:%Y-%m-%d} ({m['splits']['validation_snapshots']} "
+            f"snapshots after the purge, boundary selection only); holdout the last {holdout_months} months. Synthetic scale: "
             f"{m['splits']['scale'] or 'not given'}."),
             (f"- The numbers come from an evaluation model fitted on the training split only, not from the promoted "
             f"`{r.model_version}` bundle. The production model is refit on all snapshots."),
             f"- Rows: {r.n_rows}; churn labels: {r.n_positives} (base rate {_pct(m['base_rate'])})",
             f"- ROC-AUC {_num(m['roc_auc'])}, PR-AUC {_num(m['pr_auc'])}, Brier {_num(m['brier'])}",
-            f"- Recommended at-risk boundary: {boundary}. The runtime tiers are not changed by it.",
+            *_boundary_lines(r),
             (f"- Top-decile precision {_pct(m['top_decile_precision'])} against a ceiling of "
             f"{_pct(m['ceilings']['top_decile_precision'])} at the measured base rate; the earlier 0.70 top-decile "
             "target was replaced because it is unreachable under this label."),

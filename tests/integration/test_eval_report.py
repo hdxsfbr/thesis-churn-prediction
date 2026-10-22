@@ -62,6 +62,16 @@ def test_report_shows_counts_ceiling_and_recommended_boundary(report):
     assert "recall_breakdown" in m and "boundary" in m
     card = (docs / "model-card.md").read_text()
     assert "refit on all snapshots" in card
+    bd, pb, rb = m["boundary"], m["precision_at_boundary"], m["recall_breakdown"]
+    if bd["threshold"] is None:
+        assert "none" in card and bd["reason"] in card
+    else:
+        assert "validation recall" in card.lower()
+        assert f"{bd['validation_churners']} validation churners" in card
+        assert f"{rb['caught']} of {rb['total']}" in card
+        assert f"{pb['true_positives']} churners among {pb['flagged']}" in card
+        assert "reported, no target" in card
+    assert "after the purge" in card
 
 
 def test_evaluate_does_not_write_agent_config(pipeline, tmp_path):

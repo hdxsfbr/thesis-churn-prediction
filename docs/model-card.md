@@ -16,11 +16,13 @@ Rank active subscribers by the probability of a voluntary cancellation in the ne
 
 ## Evaluation (holdout 2025-02-28 to 2025-04-30)
 
-- Splits: training 2023-09-30 to 2024-09-30; validation 2024-11-30 to 2024-12-31 (3 months, boundary selection only); holdout the last 3 months. Synthetic scale: small.
+- Splits: training 2023-09-30 to 2024-09-30; validation 2024-11-30 to 2024-12-31 (2 snapshots after the purge, boundary selection only); holdout the last 3 months. Synthetic scale: small.
 - The numbers come from an evaluation model fitted on the training split only, not from the promoted `lgbm-20250630-29a8eca6` bundle. The production model is refit on all snapshots.
 - Rows: 55536; churn labels: 1700 (base rate 3.1%)
 - ROC-AUC 0.824, PR-AUC 0.478, Brier 0.019
-- Recommended at-risk boundary: 0.030 (recommended only, chosen on validation data). The runtime tiers are not changed by it.
+- **Recommended at-risk boundary:** 0.030, the highest threshold whose recall on the validation split is at least 0.65 (validation recall 71.2% over 969 validation churners). It is a recommendation only: the runtime tiers and `AGENT_CONFIG` are not changed by this report.
+- **Holdout recall at the boundary:** 62.9%: 1120 of 1781 cancelling churners caught, 64 with no score before cancelling, 597 with a last score below the boundary.
+- **Holdout precision at the boundary (reported, no target):** 10.3%: 1115 churners among 10792 rows scored at or above the boundary.
 - Top-decile precision 17.3% against a ceiling of 30.6% at the measured base rate; the earlier 0.70 top-decile target was replaced because it is unreachable under this label.
 
 | Requirement | Target | Measured | Status | Reason |
