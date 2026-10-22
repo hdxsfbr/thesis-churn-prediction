@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import math
+from dataclasses import asdict, dataclass
 from datetime import datetime
+
+import pandas as pd
 
 from churn.agent.content import build_content
 from churn.agent.context import PENDING, AgentContext, build_contexts
 from churn.agent.gate import GateResult, apply_gate, cost_of
+from churn.agent.policy import PolicyConfig, PolicyContext, Selection, select
+from churn.agent.rationale import build as build_rationale
 from churn.execution.approvals import payload_hash
-from churn.interventions.base import Action, Content, InterventionType, RegistryError, load_registry
-from churn.runtime_config import RuntimeConfig
+from churn.interventions.base import Action, Content, InterventionType, load_registry
+from churn.runtime_config import RuntimeConfig, defaults
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
 
@@ -31,6 +36,7 @@ class Decision:
     action: Action
     content: Content
     gate: GateResult | None = None  # None: not gated (autonomous)
+    policy: Selection | None = None
 
     @property
     def needs_approval(self) -> bool:
@@ -51,20 +57,7 @@ class Decision:
         }
 
     def rationale(self) -> dict:
-        c = self.context
-        return {
-            "top_factors": c.top_factors,
-            "archetype": c.archetype,
-            "archetype_conf": c.archetype_conf,
-            "tier": c.tier,
-            "risk": c.risk,
-            "eligible": [self.intervention.name],
-            "removed": [],
-            "chosen": self.intervention.name,
-            "explore": False,
-            "gate": "approval" if self.needs_approval else "autonomous",
-            "summary": f"{c.tier} risk ({c.risk:.2f}); thin path sends {self.intervention.name}",
-        }
+        return build_rationale(self)
 
     def log_row(self, decided_at: datetime, stale_reason: str | None = None) -> dict:
         """INTERVENTION_LOG row. ``stale_reason`` marks an autonomous decision dropped at dispatch."""
@@ -87,7 +80,7 @@ class Decision:
             "content_ref": self.content.ref,
             "content_source": self.content.source,
             "rationale": json.dumps(self.rationale(), sort_keys=True),
-            "policy_scores": json.dumps({}),
+            "policy_scores": json.dumps(self.policy.scores if self.policy else {}, sort_keys=True),
             "guardrail_events": json.dumps(events),
             "gate_reason": self.gate.text if self.gate else "autonomous: not gated",
             "approval_status": "PENDING" if pending else "NOT_REQUIRED",
@@ -121,25 +114,52 @@ class Decision:
         }
 
 
-def decide(contexts: list[AgentContext], registry: dict[str, InterventionType]) -> list[Decision]:
-    """Thin path: every at-risk subscriber gets the check-in email. Pure and deterministic."""
-    if THIN_PATH_TYPE not in registry:
-        raise RegistryError(f"thin path requires intervention type '{THIN_PATH_TYPE}' in config/interventions.yaml")
-    intervention = registry[THIN_PATH_TYPE]
-    return [
-        Decision(
-            decision_id=decision_id(c.run_id, c.subscriber_key),
-            context=c,
-            intervention=intervention,
-            action=intervention.action(c),
-            content=build_content(intervention, c),
-        )
-        for c in contexts
-    ]
+def decide(contexts: list[AgentContext], registry: dict[str, InterventionType],
+           policy_config: PolicyConfig | None = None, stats: dict | None = None) -> list[Decision]:
+    """Stable key order and a hard per-run exploration budget (including small batches)."""
+    cfg = policy_config or PolicyConfig(**defaults()['policy'])
+    budgets = {r: math.floor(sum(c.run_id == r for c in contexts) * cfg.max_explore_share)
+               for r in {c.run_id for c in contexts}}
+    decisions = []
+    for c in sorted(contexts, key=lambda c: (c.run_id, c.subscriber_key)):
+        selection = select(c, registry, cfg, stats or {}, allow_explore=budgets[c.run_id] > 0)
+        budgets[c.run_id] -= int(selection.explore)
+        intervention = registry[selection.chosen]
+        decisions.append(Decision(decision_id(c.run_id, c.subscriber_key), c, intervention,
+                                  intervention.action(c), build_content(intervention, c), policy=selection))
+    return decisions
 
 
 def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig) -> list[Decision]:
     """Read this run's scores, build contexts for the at-risk tiers, decide and gate (approval vs outbox)."""
     scores = wh.query(f"SELECT * FROM {settings.schemas.ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
+    if cfg.agent_halt:
+        return []
     contexts = build_contexts(scores, cfg.tiers.at_risk_tiers())
-    return apply_gate(decide(contexts, load_registry()), cfg)
+    # Reuse the same point-in-time feature builder as scoring; no raw identifiers enter policy.
+    from churn.contract.loader import contract_for
+    from churn.features.builder import build_features
+    enriched = []
+    for as_of, group in scores.groupby('as_of'):
+        features = build_features(wh, settings, contract_for(settings), pd.Timestamp(as_of).to_pydatetime())
+        by_key = features.set_index('subscriber_key').to_dict('index')
+        score_rows = group.set_index('subscriber_key').to_dict('index')
+        for c in contexts:
+            if c.subscriber_key not in score_rows:
+                continue
+            row, f = score_rows[c.subscriber_key], by_key.get(c.subscriber_key, {})
+            data = asdict(c)
+            data['archetype'] = row.get('archetype') or 'PENDING'
+            conf = row.get('archetype_conf')
+            data['archetype_conf'] = float(conf) if pd.notna(conf) else None
+            low_conf = row.get('archetype_low_conf')
+            data['archetype_low_conf'] = bool(low_conf) if pd.notna(low_conf) else False
+            probs = row.get('archetype_probs')
+            rate = f.get('email_open_rate_90')
+            enriched.append(PolicyContext(**data, tenure_days=f.get('tenure_days', 0),
+                email_open_rate=float(rate) if pd.notna(rate) else None,
+                archetype_probs=json.loads(probs) if isinstance(probs, str) else {}))
+    rows = wh.query(f'SELECT * FROM {settings.schemas.ops}.POLICY_STATS')
+    stats = {(r.archetype, r.intervention_type, r.context_bucket): (r.alpha, r.beta)
+             for r in rows.itertuples(index=False)}
+    return apply_gate(decide(enriched, load_registry(), cfg.policy, stats), cfg)

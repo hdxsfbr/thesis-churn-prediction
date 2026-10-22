@@ -39,27 +39,30 @@ def test_editing_agent_config_threshold_changes_next_run_routing(pipeline):
             "('medium', 'high', 'critical')"
         )["churn_prob"]
 
-        def split(threshold):
-            above = int((scores >= threshold).sum())
-            return above, len(scores) - above
+        def split(threshold, run_id):
+            # Escalation is already a human hand-off and bypasses thresholds (T14).
+            log = wh.query('SELECT risk, intervention_type, params FROM CHURN_OPS.INTERVENTION_LOG '
+                           'WHERE run_id = :r', {'r': run_id})
+            above = int(((log['risk'] >= threshold) & (log['intervention_type'] != 'escalation')).sum())
+            return above, len(log) - above
 
-        assert routing(wh, "t-thr-before") == split(1.0)
+        assert routing(wh, "t-thr-before") == split(1.0, 't-thr-before')
 
         lowest = float(scores.min())
         set_gate(wh, lowest)  # now every at-risk subscriber is at or above the threshold
         second = run_cycle(wh, settings, AS_OF, run_id="t-thr-after")
         assert second.status == "SUCCEEDED"
-        assert routing(wh, "t-thr-after") == (second.at_risk, 0)
+        assert routing(wh, "t-thr-after") == split(lowest, 't-thr-after')
         assert routing(wh, "t-thr-after")[0] > routing(wh, "t-thr-before")[0]  # the edit changed the routing
 
         # A threshold in the middle splits the batch exactly by risk.
         mid = float(scores.median())
         set_gate(wh, mid)
         run_cycle(wh, settings, AS_OF, run_id="t-thr-mid")
-        assert routing(wh, "t-thr-mid") == split(mid)
+        assert routing(wh, "t-thr-mid") == split(mid, 't-thr-mid')
 
         # The first run's pinned snapshot is unchanged by later edits: a replay routes like before.
         run_cycle(wh, settings, AS_OF, run_id="t-thr-before")
-        assert routing(wh, "t-thr-before") == split(1.0)
+        assert routing(wh, "t-thr-before") == split(1.0, 't-thr-before')
     finally:
         rc.seed(wh, settings, overwrite=True)

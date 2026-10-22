@@ -27,6 +27,38 @@ holdout:
   share: 0.10
   salt_version: v1
 
+policy:
+  max_explore_share: 0.2
+  low_confidence: 0.5
+  unknown_email_reach: 0.5
+  value_by_tenure: {'<90': 50, '90-365': 150, '>365': 400}
+  priors:
+    default:
+      checkin_email: [20, 80]
+      formulation: [10, 90]
+      retention_offer: [10, 90]
+      escalation: [5, 95]
+    price_sensitive:
+      checkin_email: [10, 90]
+      formulation: [10, 90]
+      retention_offer: [80, 20]
+      escalation: [5, 95]
+    efficacy_dissatisfied:
+      checkin_email: [10, 90]
+      formulation: [80, 20]
+      retention_offer: [10, 90]
+      escalation: [5, 95]
+    fatigued:
+      checkin_email: [80, 20]
+      formulation: [10, 90]
+      retention_offer: [10, 90]
+      escalation: [5, 95]
+    life_change:
+      checkin_email: [50, 50]
+      formulation: [5, 95]
+      retention_offer: [5, 95]
+      escalation: [60, 40]
+
 outcomes:
   window_days: 30
   response_window_days: 7

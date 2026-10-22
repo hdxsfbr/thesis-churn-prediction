@@ -24,7 +24,8 @@ def env(pipeline):
     """Gate threshold so low that every at-risk decision needs approval; config restored afterwards."""
     wh, settings = pipeline["wh"], pipeline["settings"]
     rc.seed(wh, settings, overwrite=True)
-    gate = {"t_risk": 0.0001, "t_cost_usd": 15, "t_discount_pct": 20, "always_approve": []}
+    # Human-queue escalations bypass risk thresholds; explicitly include them in this all-pending fixture.
+    gate = {"t_risk": 0.0001, "t_cost_usd": 15, "t_discount_pct": 20, "always_approve": ['escalation']}
     wh.execute("UPDATE CHURN_OPS.AGENT_CONFIG SET value_json = :v WHERE key = 'gate'", {"v": json.dumps(gate)})
     yield wh, settings
     rc.seed(wh, settings, overwrite=True)
