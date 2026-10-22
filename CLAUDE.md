@@ -5,6 +5,10 @@
 - Only change files listed in your ticket's slice (plus the minimum needed in shared files). Never delete or rewrite files that belong to other tickets; if a file outside your slice looks wrong or missing, report it, do not fix it.
 - Shared hot files (`src/churn/cli.py`, `src/churn/orchestration/runner.py`, `tests/conftest.py`): keep edits small and additive (new functions/commands appended, no reordering or reformatting) to keep merges clean.
 - Migrations: use the next free version number on main at build time; never edit a migration that already shipped.
+- Code Reviewer and Doc Auditor review by reading. They must NOT run the test suite, the slow tests, `churn` commands, or create/install Python environments. The Builder runs ruff and the full suite and reports the results; CI on the merge request is the test gate.
+- Reviewers may use cheap read-only inspection to verify the working tree matches the Builder's report: `git status`, `git diff`, `ls`, `grep`, `cat`. Use these to confirm files were really added, changed or deleted as claimed.
+- If a reviewer believes a test result is wrong or missing, say so in the review and send it back to the Builder; do not run it yourself.
+- Builder: when a round only changes Markdown files, do not rerun the full suite or slow tests; say "docs-only round, tests not rerun" in your summary.
 
 ## Lessons
 
