@@ -79,7 +79,7 @@ def evaluate(
         typer.echo(f"evaluation FAILED: {exc}", err=True)
         raise typer.Exit(1) from exc
     for t in result.targets:
-        line = f"{t.requirement} {t.name}: {t.status} (measured {t.value:.3f}, target > {t.target:.2f})"
+        line = f"{t.requirement} {t.name}: {t.status} (measured {t.value:.3f}, target {t.op} {t.target:.2f})"
         typer.echo(line + (f" - {t.reason}" if t.reason else ""))
 
 
