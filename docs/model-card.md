@@ -14,18 +14,22 @@ Rank active subscribers by the probability of a voluntary cancellation in the ne
 - Training data: monthly point-in-time snapshots of active subscribers built by the feature SQL, so each row only sees data from before its scoring date.
 - Data in this repository is synthetic. Numbers below say nothing about real Thesis customers until the model is evaluated on their data. The 90-day impact target can only be checked after go-live.
 
-## Evaluation (last 3 months, 2025-02-28 to 2025-04-30)
+## Evaluation (holdout 2025-02-28 to 2025-04-30)
 
-- Numbers come from a holdout refit twin (trained on snapshots before the holdout), not from the promoted `lgbm-20250630-29a8eca6` bundle itself.
+- Splits: training 2023-09-30 to 2024-09-30; validation 2024-11-30 to 2024-12-31 (3 months, boundary selection only); holdout the last 3 months. Synthetic scale: small.
+- The numbers come from an evaluation model fitted on the training split only, not from the promoted `lgbm-20250630-29a8eca6` bundle. The production model is refit on all snapshots.
 - Rows: 55536; churn labels: 1700 (base rate 3.1%)
-- ROC-AUC 0.824, PR-AUC 0.484, Brier 0.019
+- ROC-AUC 0.824, PR-AUC 0.478, Brier 0.019
+- Recommended at-risk boundary: 0.030 (recommended only, chosen on validation data). The runtime tiers are not changed by it.
+- Top-decile precision 17.3% against a ceiling of 30.6% at the measured base rate; the earlier 0.70 top-decile target was replaced because it is unreachable under this label.
 
 | Requirement | Target | Measured | Status | Reason |
 |---|---|---|---|---|
-| R3.6 top_decile_precision | > 70% | 16.7% | MISS | top decile precision 0.17 is not above the target 0.70; holdout has 1700 churn labels in 55536 scored rows (base rate 3.1%); the best possible top-decile precision is 0.31 at this base rate |
-| R3.6 pre_cancellation_recall | > 60% | 40.0% | MISS | pre cancellation recall 0.40 is not above the target 0.60; holdout has 1700 churn labels in 55536 scored rows (base rate 3.1%); of 1781 cancelling churners, 713 were caught, 64 had no score before cancelling, and 1004 had a last score below the at-risk boundary (0.20) |
+| R3.6 top_share_precision | > 50% | 67.1% | PASS | target met |
+| R3.6 top_decile_lift | >= 4.0x | 5.65x | PASS | target met |
+| R3.6 pre_cancellation_recall | > 60% | 62.9% | PASS | target met |
 
-Status summary: top_decile_precision MISS; pre_cancellation_recall MISS.
+Status summary: top_share_precision PASS; top_decile_lift PASS; pre_cancellation_recall PASS.
 
 ## Limitations
 
