@@ -66,6 +66,9 @@ class RetentionOffer(InterventionType):
         body = BODY.replace("{description}", description).replace("{code}", code)
         return Content(subject=SUBJECT, body=body, source="template", ref=f"retention_offer/{code}")
 
-    def cost_usd(self, context: AgentContext) -> float:
+    def cost_usd(self, context: AgentContext | Action) -> float:
+        # The gate costs the selected action; policy callers may still supply context.
+        if isinstance(context, Action):
+            return OFFERS[context.offer_code][1]
         code, _ = self._choose(context)
         return OFFERS[code][1]

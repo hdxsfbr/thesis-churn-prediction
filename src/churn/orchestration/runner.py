@@ -174,7 +174,7 @@ def run_cycle(
             raise
         raise RunFailed(f"{type(exc).__name__}: {exc}" + (f" ({hint})" if hint else "")) from exc
 
-    return _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched)
+    return _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched, queued)
 
 
 def _finish(wh, ops, base, t0, log, cfg, version, active, scored, at_risk, decided, dispatched, queued=0) -> RunResult:

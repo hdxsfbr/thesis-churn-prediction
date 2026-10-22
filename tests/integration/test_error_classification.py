@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import replace
 from datetime import date
 
 import pytest
 
 from churn import runtime_config
+from churn.agent.gate import GateResult
 from churn.obs.errors import ContractError
 from churn.obs.logging import configure_logging
 from churn.orchestration import runner
@@ -53,6 +55,32 @@ def test_zero_active_subscribers_succeeds_with_warning(pipeline):
     recs = [json.loads(ln) for ln in buf.getvalue().splitlines() if ln.strip()]
     warnings = [r for r in recs if r["level"] == "warning"]
     assert warnings and all(r["run_id"] == "t-zero" for r in warnings)
+
+
+def test_success_preserves_queued_counts_and_step_order(pipeline, monkeypatch):
+    wh, settings = pipeline["wh"], pipeline["settings"]
+    buf = io.StringIO()
+    configure_logging(stream=buf)
+    original = runner.run_agent
+
+    def require_approval(*args, **kwargs):
+        decisions = original(*args, **kwargs)
+        return [replace(d, gate=GateResult(True, ["test approval"])) for d in decisions]
+
+    monkeypatch.setattr(runner, "run_agent", require_approval)
+    result = run_cycle(wh, settings, AS_OF, run_id="t-queued-logs")
+    row = _runs(wh, result.run_id)
+    queued = len(wh.query(
+        "SELECT * FROM CHURN_OPS.APPROVALS WHERE run_id = :r", {"r": result.run_id}
+    ))
+    assert queued > 0
+    assert result.queued == row["queued"] == queued
+    assert result.dispatched == row["dispatched"] == 0
+    recs = [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
+    starts = [r["step"] for r in recs if r["event"] == "step_start"]
+    ends = [r["step"] for r in recs if r["event"] == "step_end"]
+    assert starts == ends
+    assert starts.index("reconcile") < starts.index("approvals") < starts.index("agent")
 
 
 def test_failed_step_records_error_class(pipeline, monkeypatch):
