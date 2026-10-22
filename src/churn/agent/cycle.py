@@ -9,6 +9,8 @@ from datetime import datetime
 
 from churn.agent.content import build_content
 from churn.agent.context import PENDING, AgentContext, build_contexts
+from churn.agent.gate import GateResult, apply_gate, cost_of
+from churn.execution.approvals import payload_hash
 from churn.interventions.base import Action, Content, InterventionType, RegistryError, load_registry
 from churn.runtime_config import RuntimeConfig
 from churn.settings import Settings
@@ -28,6 +30,25 @@ class Decision:
     intervention: InterventionType
     action: Action
     content: Content
+    gate: GateResult | None = None  # None: not gated (autonomous)
+
+    @property
+    def needs_approval(self) -> bool:
+        return self.gate is not None and self.gate.needs_approval
+
+    def payload(self) -> dict:
+        """The proposed action: what the outbox would carry and what the approver sees. Hashed for tamper checks."""
+        return {
+            "subscriber_key": self.context.subscriber_key,
+            "channel": self.intervention.channel,
+            "intervention_type": self.intervention.name,
+            "subject": self.content.subject,
+            "body": self.content.body,
+            "offer_code": self.action.offer_code,
+            "discount_pct": self.action.discount_pct,
+            "escalation_reason": self.action.escalation_reason,
+            "cost_usd": cost_of(self),
+        }
 
     def rationale(self) -> dict:
         c = self.context
@@ -41,12 +62,17 @@ class Decision:
             "removed": [],
             "chosen": self.intervention.name,
             "explore": False,
-            "gate": "autonomous",
+            "gate": "approval" if self.needs_approval else "autonomous",
             "summary": f"{c.tier} risk ({c.risk:.2f}); thin path sends {self.intervention.name}",
         }
 
-    def log_row(self, decided_at: datetime) -> dict:
+    def log_row(self, decided_at: datetime, stale_reason: str | None = None) -> dict:
+        """INTERVENTION_LOG row. ``stale_reason`` marks an autonomous decision dropped at dispatch."""
         c = self.context
+        pending = self.needs_approval
+        dropped = not pending and stale_reason is not None
+        sent = not pending and not dropped
+        events = [{"event": "CANCELLED_STALE", "reason": stale_reason, "at": decided_at.isoformat()}] if dropped else []
         return {
             "decision_id": self.decision_id,
             "subscriber_key": c.subscriber_key,
@@ -62,16 +88,19 @@ class Decision:
             "content_source": self.content.source,
             "rationale": json.dumps(self.rationale(), sort_keys=True),
             "policy_scores": json.dumps({}),
-            "guardrail_events": json.dumps([]),
-            "gate_reason": "autonomous: gate not active yet",
-            "approval_status": "NOT_REQUIRED",
-            "execution_status": "DISPATCHED",
-            "outbox_id": self.decision_id,
+            "guardrail_events": json.dumps(events),
+            "gate_reason": self.gate.text if self.gate else "autonomous: not gated",
+            "approval_status": "PENDING" if pending else "NOT_REQUIRED",
+            "execution_status": "PENDING_APPROVAL" if pending else "DISPATCHED" if sent else "CANCELLED_STALE",
+            "outbox_id": self.decision_id if sent else None,
             "response": PENDING,
             "outcome": PENDING,
             "decided_at": decided_at,
             "approved_at": None,
-            "dispatched_at": decided_at,
+            "dispatched_at": decided_at if sent else None,
+            "payload_hash": payload_hash(self.payload()),
+            "decided_by": None,
+            "approval_note": None,
             "outcome_at": None,
         }
 
@@ -110,7 +139,7 @@ def decide(contexts: list[AgentContext], registry: dict[str, InterventionType]) 
 
 
 def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig) -> list[Decision]:
-    """Read this run's scores, build contexts for the at-risk tiers and decide."""
+    """Read this run's scores, build contexts for the at-risk tiers, decide and gate (approval vs outbox)."""
     scores = wh.query(f"SELECT * FROM {settings.schemas.ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
     contexts = build_contexts(scores, cfg.tiers.at_risk_tiers())
-    return decide(contexts, load_registry())
+    return apply_gate(decide(contexts, load_registry()), cfg)

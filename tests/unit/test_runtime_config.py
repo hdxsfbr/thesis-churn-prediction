@@ -90,6 +90,19 @@ def test_invalid_thresholds_yield_approve_all_and_degraded(cfg_wh, bad):
     assert tiers["tier"].notna().all()
 
 
+def test_approval_grace_parsed_defaults_and_rejects_negative(cfg_wh):
+    wh, settings = cfg_wh
+    assert rc.load(wh, settings).guardrails.approval_grace_h == 24
+    base = {"contact_cap_14d": 1, "contact_cap_90d": 3, "max_discount_pct": 25,
+            "offer_catalogue": ["FREE_SHIPPING"], "approval_expiry_h": 72}
+    set_key(wh, "guardrails", {**base, "approval_grace_h": 6.5})
+    assert rc.load(wh, settings).guardrails.approval_grace_h == 6.5
+    set_key(wh, "guardrails", base)  # absent: default
+    assert rc.load(wh, settings).guardrails.approval_grace_h == 24
+    set_key(wh, "guardrails", {**base, "approval_grace_h": -1})
+    assert rc.load(wh, settings).agent_halt
+
+
 @pytest.mark.parametrize(
     "key,bad",
     [

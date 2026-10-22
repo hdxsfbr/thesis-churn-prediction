@@ -60,6 +60,7 @@ class GuardrailConfig(BaseModel):
     max_discount_pct: float = Field(ge=0, le=100)
     offer_catalogue: list[str] = Field(min_length=1)
     approval_expiry_h: float = Field(gt=0)
+    approval_grace_h: float = Field(default=24, ge=0)  # answered rows are honoured this long after the deadline
 
     @model_validator(mode="after")
     def _caps(self) -> GuardrailConfig:
