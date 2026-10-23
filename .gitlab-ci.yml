@@ -24,7 +24,10 @@ test:
   stage: test
   script:
     - python -m pytest --junitxml=junit.xml
+    - churn report-tests --junit junit.xml --output docs/test-results.md
   artifacts:
     when: always
+    paths:
+      - docs/test-results.md
     reports:
       junit: junit.xml

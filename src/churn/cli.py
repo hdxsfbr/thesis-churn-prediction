@@ -1,4 +1,4 @@
-"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate, serve, worker."""
+"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate, serve, worker, report-tests."""
 
 from __future__ import annotations
 
@@ -183,6 +183,18 @@ def worker() -> None:
 
     settings, wh = _open()
     Worker(wh, settings).start()
+
+
+@app.command()
+def report_tests(
+    junit: Path = typer.Option(..., "--junit", help="JUnit XML written by pytest"),
+    output: Path = typer.Option(Path("docs/test-results.md"), "--output", help="Markdown report path"),
+) -> None:
+    """Write docs/test-results.md from a JUnit file, including slow and scale metrics when present."""
+    from churn.reporting import write_report
+
+    write_report(junit, output)
+    typer.echo(f"wrote {output}")
 
 
 if __name__ == "__main__":
