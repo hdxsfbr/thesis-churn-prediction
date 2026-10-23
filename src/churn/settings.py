@@ -53,6 +53,11 @@ class ModelSettings(BaseModel):
     lightgbm: dict[str, Any] = Field(default_factory=dict)
 
 
+class RetrainSettings(BaseModel):
+    min_new_outcomes: int = Field(default=100, ge=0)
+    tolerance: float = Field(default=0.01, gt=0, le=1)
+
+
 class Settings(BaseModel):
     backend: str = "duckdb"
     warehouse: WarehouseSettings = WarehouseSettings()
@@ -63,6 +68,7 @@ class Settings(BaseModel):
     label: Label = Label()
     synth: SynthSettings = SynthSettings()
     model: ModelSettings = ModelSettings()
+    retrain: RetrainSettings = RetrainSettings()
     # Secret: env only, never read from YAML.
     key_pepper: str = ""
 

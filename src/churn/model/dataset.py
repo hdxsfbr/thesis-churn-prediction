@@ -8,7 +8,7 @@ import pandas as pd
 
 from churn.contract.loader import Contract
 from churn.contract.views import contract_ctes
-from churn.features.builder import as_of_ts, build_features
+from churn.features.builder import as_of_ts, build_features, intervention_log_ready
 from churn.features.registry import FEATURE_COLUMNS
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
@@ -39,15 +39,53 @@ def churners(wh: Warehouse, settings: Settings, contract: Contract, as_of: date 
     return set(df["subscriber_key"])
 
 
+def observed_labels(wh: Warehouse, settings: Settings, as_of: date | datetime) -> dict[str, int]:
+    """subscriber_key -> 1 if the latest closed treated outcome is churned, else 0.
+
+    Only outcomes measured at or before ``as_of`` count. Holdout is not a treatment.
+    """
+    if not intervention_log_ready(wh, settings):
+        return {}
+    ops = settings.schemas.ops
+    frame = wh.query(
+        f"""
+        SELECT subscriber_key, outcome FROM (
+            SELECT subscriber_key, outcome,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY subscriber_key ORDER BY outcome_at DESC, decision_id
+                   ) AS rn
+            FROM {ops}.INTERVENTION_LOG
+            WHERE execution_status = 'DISPATCHED'
+              AND outcome IN ('retained', 'churned')
+              AND outcome_at IS NOT NULL
+              AND outcome_at <= CAST(:as_of AS TIMESTAMP)
+              AND dispatched_at < CAST(:as_of AS TIMESTAMP)
+        ) ranked
+        WHERE rn = 1
+        """,
+        {"as_of": as_of_ts(as_of)},
+    )
+    return {row.subscriber_key: int(row.outcome == "churned") for row in frame.itertuples(index=False)}
+
+
 def build_dataset(wh: Warehouse, settings: Settings, contract: Contract, train_end: date) -> pd.DataFrame:
-    """Rows = (snapshot, active subscriber). Columns: snapshot_date, label, subscriber_key, features."""
+    """Rows = (snapshot, active subscriber). Columns: snapshot_date, label, subscriber_key, features.
+
+    The label is the voluntary cancellation inside the horizon. A closed treated outcome replaces it:
+    churned is 1 and retained is 0.
+    """
     frames = []
     for d in snapshot_dates(wh, settings, contract, train_end):
         feats = build_features(wh, settings, contract, d)
         if feats.empty:
             continue
         positives = churners(wh, settings, contract, d)
-        feats = feats.assign(snapshot_date=pd.Timestamp(d), label=feats["subscriber_key"].isin(positives).astype(int))
+        label = feats["subscriber_key"].isin(positives).astype(int)
+        observed = observed_labels(wh, settings, d)
+        if observed:
+            replaced = feats["subscriber_key"].map(observed)
+            label = replaced.where(replaced.notna(), label).astype(int)
+        feats = feats.assign(snapshot_date=pd.Timestamp(d), label=label)
         frames.append(feats)
     if not frames:
         return pd.DataFrame(columns=["snapshot_date", "label", "subscriber_key", *FEATURE_COLUMNS])

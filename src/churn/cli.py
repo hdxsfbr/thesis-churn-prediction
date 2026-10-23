@@ -1,4 +1,4 @@
-"""`churn` command line: migrate, synth, train, evaluate, cycle, simulate."""
+"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate."""
 
 from __future__ import annotations
 
@@ -142,6 +142,22 @@ def simulate(
     start = date.today() if as_of is None else as_of.date()
     closed = advance(wh, settings, start, days)
     typer.echo(f"simulated {days} days from {start.isoformat()}; closed {closed} outcomes")
+
+
+@app.command()
+def retrain(
+    as_of: datetime | None = typer.Option(None, formats=["%Y-%m-%d"], help="Training data end date"),
+) -> None:
+    """Fit a candidate and promote it only when the holdout stays within retrain.tolerance."""
+    from churn.feedback.retrain import retrain as retrain_model
+
+    settings, wh = _open()
+    try:
+        version, status = retrain_model(wh, settings, as_of.date() if as_of else None)
+    except ModelError as exc:
+        typer.echo(f"retrain FAILED: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{status} model {version}")
 
 
 if __name__ == "__main__":

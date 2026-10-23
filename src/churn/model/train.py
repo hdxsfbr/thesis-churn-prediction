@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import random
 from datetime import date
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.frozen import FrozenEstimator
@@ -25,6 +27,9 @@ MIN_CAL_POSITIVES = 30
 
 def fit(df: pd.DataFrame, settings: Settings):
     """Return (calibrated model, metrics). Snapshots are split by date, never by row."""
+    random.seed(settings.model.seed)
+    np.random.seed(settings.model.seed)
+    df = df.sort_values(["snapshot_date", "subscriber_key"]).reset_index(drop=True)
     dates = sorted(df["snapshot_date"].unique())
     n_cal = max(1, int(len(dates) * settings.model.calibration_share))
     cal_dates = set(dates[-n_cal:])
