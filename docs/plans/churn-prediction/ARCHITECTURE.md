@@ -274,7 +274,9 @@ All tables are created by `sql/migrations/V00x__*.sql`, applied by `churn migrat
 9. `policy_update`: posteriors from newly closed outcomes.
 10. `metrics`, then `finish`.
 
-Each step records `RUN_STEPS`. On rerun, completed steps or shards are skipped, and incomplete ones redo their work. Because every write is a MERGE on a deterministic key, redoing work cannot duplicate rows (R8.1, R8.2). Pins (model version, config snapshot, policy posteriors as of step 6) are stored at first execution and reused.
+Each step records `RUN_STEPS`. On rerun, completed `write_scores` and `agent` shards are skipped only when the previous `RUNS` status is `FAILED` or `RUNNING`. A `SUCCEEDED` replay runs the steps again. Insert-only writes keep the first rows. Because every write is a MERGE on a deterministic key, redoing work cannot duplicate rows (R8.1, R8.2). Pins (model version, config snapshot, policy posteriors as of step 6) are stored at first execution and reused.
+
+**Wave 11 as built.** `RUN_STEPS` and `RUN_LOCKS` are `V020`. `V012` stays an unused hole. The lock MERGE updates the row only for the same holder or a heartbeat older than `ttl_s` (300 seconds). Otherwise `run_cycle` returns `SKIPPED` and does not write `RUNS`. The same call releases the lock on the way out. `shards` defaults to 1, and that score write stays one transaction. More shards commit independently, and a resume does not delete a shard that is already done. Source retries are three attempts on `SourceUnavailable`, then `FAILED` with no score rows. The read that hits the source is `count_active`. A checkpointed recovery on the synthetic warehouse is not a live process kill and not a live Snowflake outage.
 
 **Determinism** (R8.2):
 - `decision_id = sha256(run_id | subscriber_key)`.
