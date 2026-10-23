@@ -18,6 +18,7 @@ class PolicyConfig(BaseModel):
     unknown_email_reach: float = Field(ge=0, le=1)
     value_by_tenure: dict[str, float]
     priors: dict[str, dict[str, tuple[float, float]]]
+    decay: float = Field(default=1.0, gt=0, le=1)  # 1 keeps every outcome; lower shrinks older evidence
 
     @model_validator(mode='after')
     def check(self):

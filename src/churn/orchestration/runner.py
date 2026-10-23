@@ -19,6 +19,7 @@ from churn.execution.approvals import process as process_approvals
 from churn.execution.outbox import dispatch
 from churn.features.builder import as_of_ts, build_features, count_active
 from churn.feedback.outcomes import close_outcomes
+from churn.feedback.policy_stats import update_posteriors
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
 from churn.obs.errors import classify, runbook_hint
@@ -167,6 +168,9 @@ def run_cycle(
                 dispatched = dispatch(wh, settings, decisions)  # rows written to the outbox
             with step("outcomes"):
                 close_outcomes(wh, settings, as_of_dt, cfg)
+            # Decide already read POLICY_STATS. Folding after that pins this run's posteriors.
+            with step("policy_update"):
+                update_posteriors(wh, settings, run_id, cfg)
     except Exception as exc:
         error_class = classify(exc)
         hint = runbook_hint(error_class) if error_class == "ModelError" else None
