@@ -430,7 +430,11 @@ Conventions for every ticket:
 - `src/churn/agent/policy.py`
 - `src/churn/agent/rationale.py`
 - `src/churn/agent/cycle.py`
-- `sql/migrations/V008__policy_stats.sql`
+- `sql/migrations/V016__policy_stats.sql`
+- `src/churn/runtime_config.py`
+- `tests/integration/test_agent_thin_path.py`
+- `tests/integration/test_approval_lifecycle.py`
+- `tests/integration/test_threshold_change_routing.py`
 - `config/runtime_defaults.yaml`
 - `tests/unit/test_policy_routing.py`
 - `tests/unit/test_policy_determinism.py`
@@ -444,6 +448,8 @@ Conventions for every ticket:
 - `test_policy_determinism.py::test_same_run_and_key_same_choice`
 - `test_policy_routing.py::test_explore_share_bounded`
 - `test_rationale.py::test_every_decision_has_structured_and_text_rationale`
+
+**Status (2026-10-23):** T13 merged as !26 and shipped in wave 6. Ticket audit reports all named acceptance tests and safety regressions passing: 38 targeted tests passed. Builder reported 167 passed / 1 deselected and lint passing. Integration updates preserve contextual-action assertions and the approved human-queue escalation bypass, not an every-action-is-email assumption. V016 follows ARCHITECTURE §5.3; POLICY_STATS starts empty and missing observations use pinned priors.
 
 **Covers:** R4.2, PRD §7 low-confidence archetype.
 
@@ -929,6 +935,8 @@ Conventions for every ticket:
 - `test_contract_swap.py::test_second_schema_by_config_only`: still passes with every mapped view copied to the second schema; the assertion is unchanged.
 - `test_archetype_scoring.py::test_archetype_beats_chance_on_latent_truth`: re-run unchanged (threshold 0.25) against the full model and passes.
 - The full suite and ruff pass, and no migration number is reused.
+
+**Status (2026-10-23):** T29 merged as !27 and shipped in wave 6. All named acceptance tests passed according to the ticket audit, including unchanged T7 precision >0.25 for every archetype. Auditor's full default suite: 163 passed / 1 deselected; ruff passed. Slow/scale/snowflake tests were excluded. T2 remains superseded; full-scale volume/throughput stays with T27, full-source re-evaluation with T30, and live Snowflake verification with A10.
 
 **Covers:** R1.1, R1.2 (content; full scale in T27), R1.6, R1.7.
 

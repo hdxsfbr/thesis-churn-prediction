@@ -100,11 +100,13 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 
 **Tickets:** T13, T29
 
+**Status (2026-10-23): shipped.** Platform input confirms !26 (T13) and !27 (T29) merged, default-branch pipeline 65760 passed, and the operator smoke tested the deployed app. T13's audit verified its named acceptance tests (38 targeted tests passed; Builder reported 167 passed / 1 deselected and lint passing). T29's audit verified its named acceptance tests and full default suite (163 passed / 1 deselected), with ruff passing. These are ticket-specific results, not a new combined-suite run. T2 remains superseded; T27 owns full-scale volume/throughput and T30 owns full-source re-evaluation.
+
 **Goal:**
 - T13: replaces the deterministic choice with the contextual Thompson-sampling policy and per-decision rationale. It needs T7, T10 and T11.
 - T29 (new in Revision 2): rebuilds T2's full synthetic source on current main. It keeps T7's `latent_archetypes()` interface and RNG streams, adds `latent_truth`, noisy reason codes, involuntary churn and edge cases, and maps all eight contract views (`customers_pii` flagged pii). It needs T3, T4 and T7, which are all merged. It comes before T27 and T16, which need the full views.
 
-**Why parallel:** T13 touches `agent/` (`policy.py`, `rationale.py`, `cycle.py`), V008 and `runtime_defaults.yaml`. T29 touches `synth/`, `contract/loader.py`, `contract/views.py`, `source_contract.yaml`, `cli.py`, synth/V003, V015, its docs and tests, and `tickets/T29.md`. No file overlaps. T29 cannot go in wave 5 because T8 also changes `cli.py`. T24 was in this wave and also changes `cli.py`, so it moved to wave 10.
+**Why parallel:** T13 touches `agent/` (`policy.py`, `rationale.py`, `cycle.py`), `sql/migrations/V016__policy_stats.sql`, `runtime_config.py`, `runtime_defaults.yaml` and existing agent/approval/routing integration tests. V008 is a historical hole; V015 was reserved for T29 under ARCHITECTURE §5.3. T29 touches `synth/`, `contract/loader.py`, `contract/views.py`, `source_contract.yaml`, `cli.py`, synth/V003, V015, its docs and tests, and `tickets/T29.md`. No file overlaps. T29 cannot go in wave 5 because T8 also changes `cli.py`. T24 was in this wave and also changes `cli.py`, so it moved to wave 10.
 
 ## Wave 7 — guardrails, LLM content, extensibility, scale, re-evaluation
 
