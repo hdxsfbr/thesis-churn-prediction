@@ -422,6 +422,8 @@ Conventions for every ticket:
 
 **Covers:** R4.6, R6.5 (gap logging), PRD §7 edge cases.
 
+**Status (2026-10-23):** merged as !29 and shipped in wave 7. Migration is V017. Builder reported 188 passed, 1 deselected, and ruff passing.
+
 ---
 
 ## T13 — Context-aware selection: contextual Thompson-sampling policy with rationale
@@ -531,6 +533,8 @@ Conventions for every ticket:
 - `test_llm_fallback.py::test_rerun_reuses_persisted_content_no_new_llm_calls`
 
 **Covers:** R4.4, R7.2, R8.1 (LLM failure).
+
+**Status (2026-10-23):** merged as !30 and shipped in wave 7. A missing provider key or SDK stays on the template. Builder reported 194 passed, 1 deselected, and ruff passing.
 
 ---
 
@@ -829,6 +833,8 @@ Conventions for every ticket:
 
 **Covers:** R8.5.
 
+**Status (2026-10-23):** merged as !31 and shipped in wave 7. Builder reported 199 passed, 1 deselected, and ruff passing.
+
 ---
 
 ## T27 — Full-scale throughput: 200k actives, 7.5M+ quiz rows, timed cycle
@@ -848,6 +854,8 @@ Conventions for every ticket:
 - `test_full_cycle_timed.py::test_full_cycle_within_interval_and_duration_recorded` (scale)
 
 **Covers:** R8.4, R1.2 (volume).
+
+**Status (2026-10-23):** merged as !32 and shipped in wave 7. On this machine the full draw had 215,649 active subscribers and 19,883,149 quiz rows, and `churn cycle --timed` finished SUCCEEDED in 54.67s. Builder reported 199 passed, 3 deselected (the slow test and the two scale tests), and ruff passing.
 
 ---
 
@@ -970,6 +978,8 @@ Conventions for every ticket:
 - The committed `docs/model-card.md` keeps the notes that synthetic accuracy is not real-world accuracy and that the 90-day impact target can only be checked after go-live.
 
 **Covers:** R3.8, R3.6 (on the full data).
+
+**Status (2026-10-23):** merged as !33 and shipped in wave 7. The committed rerun is 36,000 customers and 63,166 holdout rows. All three R3.6 targets PASS. Builder reported 202 passed, 1 deselected, and ruff passing.
 
 ---
 
