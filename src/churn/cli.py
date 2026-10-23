@@ -1,4 +1,4 @@
-"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate."""
+"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate, serve."""
 
 from __future__ import annotations
 
@@ -160,6 +160,20 @@ def retrain(
         typer.echo(f"retrain FAILED: {exc}", err=True)
         raise typer.Exit(1) from exc
     typer.echo(f"{status} model {version}")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind address"),
+    port: int = typer.Option(8000, help="Bind port"),
+) -> None:
+    """Serve the run API. The key is CHURN_API_KEY and is never read from a file."""
+    import uvicorn
+
+    from churn.api.app import create_app
+
+    settings, wh = _open()
+    uvicorn.run(create_app(settings, wh), host=host, port=port)
 
 
 if __name__ == "__main__":
