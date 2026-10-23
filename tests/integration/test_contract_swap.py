@@ -22,6 +22,10 @@ def test_second_schema_by_config_only(pipeline, tmp_path):
         "CREATE OR REPLACE TABLE ALT_SOURCE.orders AS SELECT * FROM THESIS_SYNTH.orders"
     )
     raw = yaml.safe_load(base.contract_file.read_text())
+    for name, view in raw['views'].items():
+        if name not in ('subscriptions', 'orders'):
+            physical = view['object'].replace('{schema}', raw['schema'])
+            wh.execute(f'CREATE OR REPLACE TABLE ALT_SOURCE.{name} AS SELECT * FROM {physical}')
     raw["schema"] = "ALT_SOURCE"
     raw["views"]["subscriptions"]["object"] = "{schema}.SUBS_V2"
     raw["views"]["subscriptions"]["columns"]["status"]["source"] = "state"
