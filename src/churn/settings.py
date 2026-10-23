@@ -83,6 +83,8 @@ class Settings(BaseModel):
         path = path or config_dir() / "settings.yaml"
         data = yaml.safe_load(Path(path).read_text()) or {}
         data = _deep_merge(data, overrides or {})
+        if os.environ.get("CHURN_BACKEND"):
+            data["backend"] = os.environ["CHURN_BACKEND"]
         if "CHURN_DUCKDB_PATH" in os.environ and not (overrides or {}).get("warehouse"):
             data.setdefault("warehouse", {})["path"] = os.environ["CHURN_DUCKDB_PATH"]
         if os.environ.get("CHURN_CONTRACT_PATH"):
