@@ -47,10 +47,17 @@ def bootstrap(reset: bool = typer.Option(False, help="Overwrite edited AGENT_CON
 
 
 @app.command()
-def synth(scale: str = typer.Option("tiny", help="tiny | small | default")) -> None:
-    """Write synthetic subscriptions and orders into THESIS_SYNTH."""
+def synth(
+    scale: str = typer.Option("tiny", help="tiny | small | default"),
+    profile: bool = typer.Option(False, help="Write docs/data-profile.md and CHURN_OPS.DATA_PROFILE"),
+) -> None:
+    """Write all eight synthetic source domains and latent truth into THESIS_SYNTH."""
     settings, wh = _open()
     counts = generate(wh, settings, scale=scale)
+    if profile:
+        from churn.synth.profile import write_profile
+
+        write_profile(wh, settings, scale)
     typer.echo(f"synthesised {counts['subscriptions']} subscriptions, {counts['orders']} orders")
 
 

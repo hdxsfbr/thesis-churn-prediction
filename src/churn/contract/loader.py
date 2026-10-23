@@ -21,6 +21,7 @@ class Column(BaseModel):
 
 
 class View(BaseModel):
+    pii: bool = False
     object: str
     dedup_key: str
     loaded_at: str
