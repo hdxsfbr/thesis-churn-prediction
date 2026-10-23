@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff==0.17.1"]
 llm = ["anthropic>=0.40", "openai>=1.40"]
+snowflake = ["snowflake-connector-python[pandas]>=3.12"]
 
 [project.scripts]
 churn = "churn.cli:app"

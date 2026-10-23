@@ -93,7 +93,11 @@ class DuckDBWarehouse:
         self.con.close()
 
 
-def open_warehouse(settings: Settings) -> DuckDBWarehouse:
-    if settings.backend != "duckdb":
-        raise NotImplementedError(f"backend {settings.backend!r} is not available yet")
-    return DuckDBWarehouse(settings.duckdb_path)
+def open_warehouse(settings: Settings):
+    if settings.backend == "duckdb":
+        return DuckDBWarehouse(settings.duckdb_path)
+    if settings.backend == "snowflake":
+        from churn.warehouse.snowflake import SnowflakeWarehouse
+
+        return SnowflakeWarehouse.from_env()
+    raise NotImplementedError(f"backend {settings.backend!r} is not available yet")
