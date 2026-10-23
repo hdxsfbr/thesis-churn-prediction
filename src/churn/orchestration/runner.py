@@ -18,6 +18,7 @@ from churn.contract.views import populate_key_map
 from churn.execution.approvals import process as process_approvals
 from churn.execution.outbox import dispatch
 from churn.features.builder import as_of_ts, build_features, count_active
+from churn.feedback.metrics import record_run_metrics
 from churn.feedback.outcomes import close_outcomes
 from churn.feedback.policy_stats import update_posteriors
 from churn.model.registry import load_promoted
@@ -171,6 +172,8 @@ def run_cycle(
             # Decide already read POLICY_STATS. Folding after that pins this run's posteriors.
             with step("policy_update"):
                 update_posteriors(wh, settings, run_id, cfg)
+        with step("metrics"):
+            record_run_metrics(wh, settings, run_id, at_risk=at_risk, duration_s=time.monotonic() - t0)
     except Exception as exc:
         error_class = classify(exc)
         hint = runbook_hint(error_class) if error_class == "ModelError" else None
