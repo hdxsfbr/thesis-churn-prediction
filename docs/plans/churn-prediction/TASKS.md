@@ -571,6 +571,8 @@ Conventions for every ticket:
 
 **Covers:** R6.2, R6.6.
 
+**Status (2026-10-23):** merged as !35 and shipped in wave 8. The migration is V019, not V010. The assignment column is `arm_group`. Builder reported 209 passed, 3 deselected, and ruff passing. A synthetic treated-versus-control rate is not the 90-day impact target.
+
 ---
 
 ## T17 — Feedback into selection: outcomes update policy posteriors
@@ -806,6 +808,8 @@ Conventions for every ticket:
 - `test_pii_scan.py::test_log_redaction_processor_masks_email_and_phone`
 
 **Covers:** R7.1, R4.4, R1.5.
+
+**Status (2026-10-23):** merged as !36 and shipped in wave 8. The redaction processor was already T9; this ticket added the proof. Builder reported 213 passed, 3 deselected, 1 warning, and ruff passing. A passing scan on the tiny draw is not a live-data proof.
 
 ---
 
