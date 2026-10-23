@@ -1,4 +1,4 @@
-"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate, serve."""
+"""`churn` command line: migrate, synth, train, retrain, evaluate, cycle, simulate, serve, worker."""
 
 from __future__ import annotations
 
@@ -174,6 +174,15 @@ def serve(
 
     settings, wh = _open()
     uvicorn.run(create_app(settings, wh), host=host, port=port)
+
+
+@app.command()
+def worker() -> None:
+    """Catch up today's cycle if it is missing, then block on the daily and retrain crons."""
+    from churn.orchestration.scheduler import Worker
+
+    settings, wh = _open()
+    Worker(wh, settings).start()
 
 
 if __name__ == "__main__":
