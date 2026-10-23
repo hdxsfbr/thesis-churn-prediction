@@ -769,6 +769,8 @@ Conventions for every ticket:
 
 **Covers:** R8.7, R1.4.
 
+**Status (2026-10-23):** built locally, not yet merged. The image installs `.[snowflake]`. Builder reported 247 passed, 5 deselected, 1 warning, and ruff passing on the branch before T24's tests were in that count. Docker was not run. A green default suite is not the live cycle.
+
 ---
 
 ## T24 — Snowflake backend, bootstrap of schemas/roles, and SQL portability check

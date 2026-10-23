@@ -75,3 +75,8 @@
 
 - `schedule.cron` is `0 6 * * *` UTC and `schedule.retrain_cron` is `0 6 * * 1` UTC. Both come from settings. Catch-up runs once when today's scheduled row is missing or not `SUCCEEDED` or `DEGRADED`.
 - The daily job is the cycle, then a retrain only when `retrain_due` is true. The weekly job retrains. The cycle lock is what keeps a second worker from overlapping the same day.
+
+### churn-prediction, wave 14 (2026-10-23)
+
+- One `python:3.12-slim` image, user `churn`, runs `api` and `worker`. It installs `libgomp1` and `.[snowflake]`. `CHURN_BACKEND` selects the warehouse. The DuckDB file sits on the `churn-data` volume.
+- Switching to production views edits `source_contract.yaml` only. `customers_pii` stays `pii: true`. Docker was not run. The live checklist is not a green default suite.

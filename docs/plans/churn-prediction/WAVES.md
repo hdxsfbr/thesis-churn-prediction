@@ -200,6 +200,8 @@ Both need T16's outcomes.
 
 ## Wave 14 — deployment
 
+**Status (2026-10-23):** T23 is committed locally and waits until T22 is on main. The image user is `churn` and the install includes the Snowflake extra. Docker was not run. R8.7 stays an operator check.
+
 **Tickets:** T23
 
 **Goal:** a non-root image for the `api` (T21) and `worker` (T22) services, `.env.example` covering the Snowflake settings (T24, wave 10), and the deployment guide with the config-only switch to production views. The end-to-end check is done by the operator.
