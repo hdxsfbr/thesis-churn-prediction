@@ -594,6 +594,8 @@ Conventions for every ticket:
 
 **Covers:** R6.4.
 
+**Status (2026-10-23):** merged as !37 and shipped in wave 9. No new migration. The stored posterior includes the prior, and `policy.decay` defaults to 1. Builder reported 214 passed, 3 deselected, 1 warning, and ruff passing. A shift test starts from a flat prior. There is no applied-decision ledger.
+
 ---
 
 ## T18 — Feedback into scoring: retrain with intervention history and promotion gate
@@ -621,6 +623,8 @@ Conventions for every ticket:
 - `test_retrain_promotion.py::test_intervention_history_features_present`
 
 **Covers:** R6.3, PRD §7 retrain-worse edge case.
+
+**Status (2026-10-23):** merged as !38 and shipped in wave 9. Builder reported 215 passed, 3 deselected, 1 warning, and ruff passing. That branch was cut at T16, so the count does not include T25 or T17. A one-row move on the tiny holdout can exceed the 0.01 tolerance, and the rejection keeps the promoted model.
 
 ---
 
