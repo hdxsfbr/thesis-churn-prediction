@@ -56,7 +56,12 @@ def pending(env_, run_id):
     wh, settings = env_
     result = run_cycle(wh, settings, AS_OF, run_id=run_id)
     rows = approvals(wh, run_id)
-    assert len(rows) == result.at_risk > 0
+    holdout = int(wh.query(
+        f"SELECT COUNT(*) AS n FROM {OPS}.INTERVENTION_LOG WHERE run_id = :r AND intervention_type = 'HOLDOUT'",
+        {"r": run_id},
+    ).iloc[0]["n"])
+    assert len(rows) == result.at_risk - holdout > 0
+    assert result.decided == result.at_risk
     return rows, result
 
 

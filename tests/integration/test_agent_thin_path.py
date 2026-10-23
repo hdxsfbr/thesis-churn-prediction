@@ -44,7 +44,8 @@ def test_at_risk_subscriber_gets_one_outbox_row_and_log_row(pipeline):
     assert len(log) == len(at_risk)
     assert log["decision_id"].is_unique
     assert set(log["subscriber_key"]) == set(at_risk["subscriber_key"])
-    assert log['intervention_type'].isin(load_registry()).all()
+    treated = log[log["intervention_type"] != "HOLDOUT"]
+    assert treated["intervention_type"].isin(load_registry()).all()
     for key, did in zip(log["subscriber_key"], log["decision_id"], strict=True):
         assert did == hashlib.sha256(f"t-agent-1|{key}".encode()).hexdigest()
 
@@ -63,7 +64,7 @@ def test_at_risk_subscriber_gets_one_outbox_row_and_log_row(pipeline):
     assert set(auto["outbox_id"]) == set(out["outbox_id"])
     assert result.status == "SUCCEEDED"
     assert result.decided == len(at_risk)
-    assert result.dispatched == len(auto) and result.queued == len(at_risk) - len(auto)
+    assert result.dispatched == len(auto) and result.queued == len(treated) - len(auto)
 
 
 def test_log_row_has_all_r6_1_fields_or_pending(pipeline):
@@ -171,17 +172,18 @@ def test_halted_agent_writes_nothing_and_approve_all_queues_everything(pipeline)
         assert res.status == "DEGRADED" and res.gate_mode == "approve_all"
         scores = _scores(wh, "t-agent-skip-gate")
         expected = int(scores["tier"].isin(AT_RISK).sum())
-        assert expected > 0 and res.at_risk == res.decided == expected
-        assert res.dispatched == 0 and res.queued == expected
         log = _log(wh, "t-agent-skip-gate")
-        assert len(log) == expected and (log["approval_status"] == "PENDING").all()
+        actionable = log[log["intervention_type"] != "HOLDOUT"]
+        assert expected > 0 and res.at_risk == res.decided == expected == len(log)
+        assert res.dispatched == 0 and res.queued == len(actionable)
+        assert (actionable["approval_status"] == "PENDING").all()
         joined = wh.query(
             "SELECT COUNT(*) AS n FROM CHURN_OPS.OUTBOX o JOIN CHURN_OPS.INTERVENTION_LOG l "
             "ON o.outbox_id = l.decision_id WHERE l.run_id = 't-agent-skip-gate'"
         )
         assert int(joined.iloc[0]["n"]) == 0
         queued = wh.query("SELECT COUNT(*) AS n FROM CHURN_OPS.APPROVALS WHERE run_id = 't-agent-skip-gate'")
-        assert int(queued.iloc[0]["n"]) == expected
+        assert int(queued.iloc[0]["n"]) == len(actionable)
 
         # agent_halt: invalid tiers; no at-risk definition, so the count stays 0.
         _reset_cfg(wh, settings)
