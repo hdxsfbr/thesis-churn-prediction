@@ -210,6 +210,8 @@ Both need T16's outcomes.
 
 ## Wave 15 — documentation and deliverables
 
+**Status (2026-10-23):** T28 is committed locally and waits until T23 is on main. The test report is generated from JUnit XML. The demo video is Andre's, and it has not been recorded.
+
 **Tickets:** T28
 
 **Goal:** the full document set and the test-results report. The docs test checks every ops table and runtime config key added by all earlier tickets.

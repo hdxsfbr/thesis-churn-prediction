@@ -918,6 +918,8 @@ Conventions for every ticket:
 
 **Covers:** R9.1, R9.2, R9.3.
 
+**Status (2026-10-23):** built locally, not yet merged. `churn report-tests` writes `docs/test-results.md` from JUnit XML. Builder reported 251 passed, 5 deselected, 1 warning, and ruff passing after the rebase onto T18 and T19. The demo video was not recorded.
+
 ---
 
 ## T29 — Rebuild the full synthetic source on main and map every contract view (supersedes T2)
