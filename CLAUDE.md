@@ -50,3 +50,8 @@
 - The holdout migration is V019, not V010, and the assignment column is `arm_group`. Control is logged as HOLDOUT and is not dispatched. `RUNS.at_risk` stays the full count; T19 subtracts holdout. `churn simulate` is the clock, and the responder is not on the cycle path. A synthetic treated-versus-control rate is not the 90-day impact target.
 - The tiny scored set often contains no control member, so the outbox test uses known keys. Do not delete another test's rows by subscriber_key.
 - There is no FEATURES table. The PII scan reads the feature frame, the training frame, the ops tables, logs, prompts, and the model bytes. `customers_pii` is named only under synth. A phone regex on decoded joblib bytes is binary noise, not a PII signal. A passing tiny scan is not a live-data proof.
+
+### churn-prediction, wave 9 (2026-10-23)
+
+- `policy_update` runs after outcomes and after decide. The stored posterior includes the prior. `policy.decay` defaults to 1. There is no applied-decision ledger and no new migration. A shift test needs a flat prior because the shipped efficacy prior already prefers formulation.
+- Retrain promotes only when top-decile precision and PR-AUC are each at least the current model minus 0.01. Rejection keeps the promoted row. `retrain.min_new_outcomes` is 100. Three history features use numeric type codes, holdout is excluded, and a closed treated outcome replaces the label. A one-row change on the tiny holdout can exceed 0.01. The weekly cron stays with the scheduler.
