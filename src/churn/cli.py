@@ -1,14 +1,15 @@
-"""`churn` command line: migrate, synth, train, evaluate, cycle."""
+"""`churn` command line: migrate, synth, train, evaluate, cycle, simulate."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from churn import runtime_config
+from churn.feedback.outcomes import advance
 from churn.model.registry import ModelError
 from churn.model.train import train as train_model
 from churn.orchestration.runner import RunFailed, run_cycle
@@ -127,6 +128,20 @@ def cycle(
         typer.echo(f"duration {seconds:.1f}s")
     if result.status == "DEGRADED":
         typer.echo(f"run DEGRADED: gate_mode={result.gate_mode}, agent_halted={result.agent_halted}", err=True)
+
+
+@app.command()
+def simulate(
+    days: int = typer.Option(..., "--days", help="Days to advance the clock"),
+    as_of: datetime | None = typer.Option(
+        None, formats=["%Y-%m-%d"], help="Day the clock starts on. Defaults to today."
+    ),
+) -> None:
+    """Each day, append simulated responses for the outbox, then close outcome windows that have elapsed."""
+    settings, wh = _open()
+    start = date.today() if as_of is None else as_of.date()
+    closed = advance(wh, settings, start, days)
+    typer.echo(f"simulated {days} days from {start.isoformat()}; closed {closed} outcomes")
 
 
 if __name__ == "__main__":

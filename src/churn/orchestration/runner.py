@@ -18,6 +18,7 @@ from churn.contract.views import populate_key_map
 from churn.execution.approvals import process as process_approvals
 from churn.execution.outbox import dispatch
 from churn.features.builder import as_of_ts, build_features, count_active
+from churn.feedback.outcomes import close_outcomes
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
 from churn.obs.errors import classify, runbook_hint
@@ -156,9 +157,16 @@ def run_cycle(
                 process_approvals(wh, settings)
             with step("agent"):
                 decisions = run_agent(wh, settings, run_id, cfg)
-                decided = len(decisions)
+                holdout_n = int(wh.query(
+                    f"SELECT COUNT(*) AS n FROM {ops}.INTERVENTION_LOG "
+                    "WHERE run_id = :r AND intervention_type = 'HOLDOUT'",
+                    {"r": run_id},
+                ).iloc[0]["n"])
+                decided = len(decisions) + holdout_n
                 queued = sum(d.needs_approval for d in decisions)
                 dispatched = dispatch(wh, settings, decisions)  # rows written to the outbox
+            with step("outcomes"):
+                close_outcomes(wh, settings, as_of_dt, cfg)
     except Exception as exc:
         error_class = classify(exc)
         hint = runbook_hint(error_class) if error_class == "ModelError" else None

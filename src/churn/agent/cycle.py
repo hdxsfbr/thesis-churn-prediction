@@ -17,6 +17,7 @@ from churn.agent.guardrails import facts_for_contexts, filter_arms, gap_reason
 from churn.agent.policy import PolicyConfig, PolicyContext, Selection, select
 from churn.agent.rationale import build as build_rationale
 from churn.execution.approvals import payload_hash
+from churn.feedback.holdout import apply_holdout
 from churn.interventions.base import Action, Content, InterventionType, load_registry
 from churn.runtime_config import RuntimeConfig, defaults
 from churn.settings import Settings
@@ -193,6 +194,7 @@ def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig
                 email_open_rate=float(rate) if pd.notna(rate) else None,
                 archetype_probs=json.loads(probs) if isinstance(probs, str) else {}))
             feature_rows[c.subscriber_key] = f
+    enriched = apply_holdout(wh, settings, enriched, cfg)
     rows = wh.query(f'SELECT * FROM {settings.schemas.ops}.POLICY_STATS')
     stats = {(r.archetype, r.intervention_type, r.context_bucket): (r.alpha, r.beta)
              for r in rows.itertuples(index=False)}
