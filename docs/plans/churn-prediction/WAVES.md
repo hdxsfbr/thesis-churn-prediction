@@ -144,6 +144,8 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 
 ## Wave 9 — feedback loops
 
+**Status (2026-10-23): shipped.** !37 (T17) and !38 (T18) merged. Pipelines 66449 and 66470 passed. Counts below are each ticket's own run, not a new combined suite. T17 added no migration. T18's 215 passed is from a branch cut at T16, so it does not include T25 or T17.
+
 **Tickets:** T17, T18
 
 **Goal:**
