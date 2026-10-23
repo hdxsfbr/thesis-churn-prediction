@@ -158,6 +158,8 @@ Both need T16's outcomes.
 
 ## Wave 10 — run metrics and Snowflake
 
+**Status (2026-10-23): shipped.** !40 (T19) and !41 (T24) merged. Pipelines 66486 and 66487 passed. Counts are each ticket's own run, not a new combined suite. T19 used the existing V018 table, not V011. The live Snowflake cycle was not run.
+
 **Tickets:** T19, T24
 
 **Goal:**
