@@ -15,6 +15,9 @@ from churn.synth import edge_cases, latent
 from churn.warehouse.base import Warehouse
 
 CHUNK = 500_000
+# Customers per commit once the population no longer fits in one frame. tiny (1_500) and small (30_000)
+# stay on the single-shot path, so their draws do not move.
+CUSTOMER_CHUNK = 40_000
 
 
 def _ts(start: datetime, days: np.ndarray) -> pd.Series:
@@ -22,9 +25,13 @@ def _ts(start: datetime, days: np.ndarray) -> pd.Series:
     return pd.Series(pd.Timestamp(start) + pd.to_timedelta(secs, unit="s")).astype("datetime64[us]")
 
 
-def build_frames(settings: Settings, n: int) -> dict[str, pd.DataFrame]:
+def build_frames(
+    settings: Settings, n: int, *, origin: int = 0, population: int | None = None,
+) -> dict[str, pd.DataFrame]:
+    """One customer range. ``origin == 0`` and the default population reproduce the original single draw."""
     cfg = settings.synth
-    rng = np.random.default_rng(cfg.seed)
+    population = n if population is None else population
+    rng = np.random.default_rng(cfg.seed if origin == 0 else [cfg.seed, int(origin)])
     end = datetime.combine(cfg.end_date, time(0))
     hist_start = end - timedelta(days=30 * cfg.history_months)
     total_days = float((end - hist_start).days)
@@ -34,7 +41,7 @@ def build_frames(settings: Settings, n: int) -> dict[str, pd.DataFrame]:
     interval = rng.choice(latent.INTERVALS, n)
     price = rng.choice(latent.PRICES, n)
     to_cancel, voluntary, _ = latent.draw_cancellation(rng, traits, start_day)
-    archetype = latent.draw_archetypes(cfg.seed, n)
+    archetype = latent.draw_archetypes(cfg.seed, population)[origin:origin + n]
     reason = latent.reasons_for(cfg.seed, archetype)
     cancel_day = start_day + to_cancel
     cancelled = cancel_day <= total_days
@@ -44,7 +51,8 @@ def build_frames(settings: Settings, n: int) -> dict[str, pd.DataFrame]:
     cancel_type = np.where(cancelled, np.where(voluntary, "voluntary", "involuntary"), None)
     reason_code = np.where(cancelled, np.where(voluntary, reason, "PAYMENT_FAILED"), None)
 
-    ids = np.arange(n)
+    ids = np.arange(origin, origin + n)
+    tag = "" if origin == 0 else f"{origin}-"
     started = _ts(hist_start, start_day)
     cancelled_at = _ts(hist_start, cancel_day).where(cancelled, pd.NaT)
     subs = pd.DataFrame(
@@ -78,8 +86,8 @@ def build_frames(settings: Settings, n: int) -> dict[str, pd.DataFrame]:
     ordered_at = _ts(hist_start, day)
     orders = pd.DataFrame(
         {
-            "order_id": [f"o{i:09d}" for i in range(m)],
-            "customer_id": [f"c{i:07d}" for i in idx],
+            "order_id": [f"{tag}o{i:09d}" for i in range(m)],
+            "customer_id": [f"c{i:07d}" for i in idx + origin],
             "ordered_at": ordered_at,
             "blend_sku": rng.choice(latent.SKUS, m),
             "amount_usd": amount,
@@ -90,7 +98,7 @@ def build_frames(settings: Settings, n: int) -> dict[str, pd.DataFrame]:
         }
     )
     frames = {'subscriptions': subs, 'orders': orders}
-    frames.update(_domains(cfg.seed, archetype, idx, day, hist_start, start_day))
+    frames.update(_domains(cfg.seed, archetype, idx, day, hist_start, start_day, origin))
     frames['latent_truth'] = pd.DataFrame({
         'customer_id': subs.customer_id, 'archetype': archetype,
         'price_sensitivity': traits.price_sensitivity, 'fatigue': traits.fatigue,
@@ -99,15 +107,16 @@ def build_frames(settings: Settings, n: int) -> dict[str, pd.DataFrame]:
     return edge_cases.apply(frames, cfg.seed)
 
 
-def _domains(seed, archetype, idx, day, hist_start, start_day):
+def _domains(seed, archetype, idx, day, hist_start, start_day, origin=0):
     """Emit observable events on each customer's live timeline, never after cancellation."""
-    rng = np.random.default_rng([seed, 4244])
+    rng = np.random.default_rng([seed, 4244] if origin == 0 else [seed, 4244, int(origin)])
     n, m = len(archetype), len(idx)
-    customers = np.array([f'c{i:07d}' for i in range(n)])
+    tag = "" if origin == 0 else f"{origin}-"
+    customers = np.array([f'c{i:07d}' for i in range(origin, origin + n)])
     ts = _ts(hist_start, day)
     events = pd.DataFrame({
-        'subscription_id': [f's{i:07d}' for i in idx],
-        'event_id': [f'se{i}' for i in range(m)],
+        'subscription_id': [f's{i:07d}' for i in idx + origin],
+        'event_id': [f'{tag}se{i}' for i in range(m)],
         'event_type': latent.emission(archetype, 'event')[idx],
         'event_ts': ts, 'loaded_at': ts,
     })
@@ -125,7 +134,7 @@ def _domains(seed, archetype, idx, day, hist_start, start_day):
         times = ts[mask].reset_index(drop=True)
         email_parts.append(pd.DataFrame({
             'customer_id': customers[idx[mask]],
-            'event_id': [f'em{kind}{i}' for i in np.flatnonzero(mask)], 'event_type': kind,
+            'event_id': [f'{tag}em{kind}{i}' for i in np.flatnonzero(mask)], 'event_type': kind,
             'campaign_id': 'monthly', 'flow_id': 'retention',
             # UTC instants represented with a real source offset; contract normalises these.
             'event_ts': times.dt.tz_localize('UTC').dt.tz_convert('America/New_York'),
@@ -138,7 +147,7 @@ def _domains(seed, archetype, idx, day, hist_start, start_day):
     category[noise] = rng.choice([v['category'] for v in latent.EMISSIONS.values()] + ['other'], noise.sum())
     times = ts[ticket_mask].reset_index(drop=True)
     tickets = pd.DataFrame({
-        'customer_id': customers[ti], 'ticket_id': [f't{i}' for i in range(len(ti))],
+        'customer_id': customers[ti], 'ticket_id': [f'{tag}t{i}' for i in range(len(ti))],
         'created_at': times, 'category': category, 'escalated': rng.random(len(ti)) < .25,
         'resolution_hours': rng.lognormal(3, .7, len(ti)),
         'sentiment_score': rng.uniform(-1, .5, len(ti)), 'loaded_at': times,
@@ -151,8 +160,8 @@ def _domains(seed, archetype, idx, day, hist_start, start_day):
     qidx = qi[repeat]
     times = qt.iloc[repeat].reset_index(drop=True)
     quiz = pd.DataFrame({
-        'answer_id': [f'a{i}' for i in range(len(repeat))], 'customer_id': customers[qidx],
-        'quiz_session_id': [f'q{i}' for i in repeat],
+        'answer_id': [f'{tag}a{i}' for i in range(len(repeat))], 'customer_id': customers[qidx],
+        'quiz_session_id': [f'{tag}q{i}' for i in repeat],
         'question_key': np.tile([f'question_{i}' for i in range(24)], len(qi)),
         'answer_value': rng.choice(['low', 'medium', 'high'], len(repeat)), 'answered_at': times,
         'recommended_sku': latent.emission(archetype, 'sku')[qidx], 'loaded_at': times,
@@ -163,9 +172,9 @@ def _domains(seed, archetype, idx, day, hist_start, start_day):
     })
     pii = pd.DataFrame({
         'customer_id': customers, 'first_name': rng.choice(['Alex', 'Sam', 'Taylor'], n),
-        'email': [f'customer{i}@example.com' for i in range(n)],
-        'phone': [f'+1555{i:07d}' for i in range(n)],
-        'address': [f'{i + 1} Fictional Street' for i in range(n)],
+        'email': [f'customer{i}@example.com' for i in range(origin, origin + n)],
+        'phone': [f'+1555{i:07d}' for i in range(origin, origin + n)],
+        'address': [f'{i + 1} Fictional Street' for i in range(origin, origin + n)],
         'loaded_at': _ts(hist_start, start_day),
     })
     return {'subscription_events': events, 'products': products,
@@ -179,17 +188,44 @@ def latent_archetypes(settings: Settings, scale: str = "tiny") -> pd.Series:
     return pd.Series(latent.draw_archetypes(settings.synth.seed, n), index=[f"c{i:07d}" for i in range(n)])
 
 
-def generate(wh: Warehouse, settings: Settings, scale: str = "tiny") -> dict[str, int]:
-    """Atomically replace every synthetic source table and latent truth."""
+def _population(settings: Settings, scale: str) -> int:
     try:
-        n = settings.synth.scales[scale]
+        return settings.synth.scales[scale]
     except KeyError:
         raise ValueError(f"unknown scale {scale!r}; choose one of {sorted(settings.synth.scales)}") from None
-    frames = build_frames(settings, n)
+
+
+def _insert(wh: Warehouse, table: str, frame: pd.DataFrame) -> None:
+    for lo in range(0, len(frame), CHUNK):
+        wh.insert_frame(table, frame.iloc[lo:lo + CHUNK])
+
+
+def generate(wh: Warehouse, settings: Settings, scale: str = "tiny") -> dict[str, int]:
+    """Replace every synthetic source table. A population above one chunk is written chunk by chunk."""
+    n = _population(settings, scale)
     schema = settings.schemas.synth
+    if n <= CUSTOMER_CHUNK:
+        frames = build_frames(settings, n)
+        with wh.transaction():
+            for name, frame in frames.items():
+                wh.execute(f'DELETE FROM {schema}.{name}')
+                _insert(wh, f'{schema}.{name}', frame)
+        return {name: len(frame) for name, frame in frames.items()}
+
+    counts: dict[str, int] = {}
+    first = build_frames(settings, min(CUSTOMER_CHUNK, n), origin=0, population=n)
     with wh.transaction():
-        for name, frame in frames.items():
+        for name in first:
             wh.execute(f'DELETE FROM {schema}.{name}')
-            for lo in range(0, len(frame), CHUNK):
-                wh.insert_frame(f'{schema}.{name}', frame.iloc[lo:lo + CHUNK])
-    return {name: len(frame) for name, frame in frames.items()}
+            _insert(wh, f'{schema}.{name}', first[name])
+            counts[name] = len(first[name])
+    for origin in range(CUSTOMER_CHUNK, n, CUSTOMER_CHUNK):
+        size = min(CUSTOMER_CHUNK, n - origin)
+        frames = build_frames(settings, size, origin=origin, population=n)
+        with wh.transaction():
+            for name, frame in frames.items():
+                if name == "products":
+                    continue
+                _insert(wh, f'{schema}.{name}', frame)
+                counts[name] = counts.get(name, 0) + len(frame)
+    return counts

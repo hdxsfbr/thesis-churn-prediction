@@ -25,6 +25,7 @@ synth:
     tiny: 1500
     small: 30000
     default: 350000
+    full: 350000
 
 model:
   seed: 7
