@@ -60,3 +60,8 @@
 
 - Run metrics live in the existing V018 `RUN_METRICS` table. Coverage subtracts holdout from the denominator, and `RUNS.at_risk` stays the full count. The metrics step still runs when the agent is halted. The small-scale 45-day evaluation passing is not the 90-day impact target.
 - The Snowflake connector is an optional extra. V013 is the sender view `CHURN_OPS.OUTBOX_FOR_SENDER`. The grants script is not a migration and DuckDB bootstrap does not run it. `CHURN_APPROVER`'s only write grant is `UPDATE` on `APPROVALS`. A skipped `snowflake` test is not live proof.
+
+### churn-prediction, wave 11 (2026-10-23)
+
+- Checkpoints and the cycle lock are V020. V012 stays unused. Resume skips finished score and agent shards only when the previous run is `FAILED` or `RUNNING`. A succeeded replay runs again, and insert-only keys keep the first rows.
+- The lock updates only for the same holder or a heartbeat older than 300 seconds. Otherwise the cycle is `SKIPPED` and writes no `RUNS` row. `shards` defaults to 1. Source reads retry three times, then the run fails with no scores. A synthetic checkpoint recovery is not a live kill or a live Snowflake outage.
