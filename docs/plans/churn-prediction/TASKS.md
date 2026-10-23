@@ -769,7 +769,7 @@ Conventions for every ticket:
 
 **Covers:** R8.7, R1.4.
 
-**Status (2026-10-23):** built locally, not yet merged. The image installs `.[snowflake]`. Builder reported 247 passed, 5 deselected, 1 warning, and ruff passing on the branch before T24's tests were in that count. Docker was not run. A green default suite is not the live cycle.
+**Status (2026-10-23):** built locally, not yet merged. The image installs `.[snowflake]`. Builder reported 250 passed, 6 deselected, 1 warning in 86.86s, and ruff passing on the branch that includes T24. The sixth deselected test is the Snowflake smoke. Docker was not run. A green default suite is not the live cycle.
 
 ---
 
