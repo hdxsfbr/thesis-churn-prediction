@@ -170,6 +170,8 @@ Both need T16's outcomes.
 
 ## Wave 11 — failure recovery
 
+**Status (2026-10-23): shipped.** !43 (T20) merged. Pipeline 66564 passed. The migration is V020, not V012. The builder count of 228 passed is from the T19 base, not a new combined suite. A checkpointed recovery is not a live process kill.
+
 **Tickets:** T20
 
 **Goal:** step and shard checkpoints, the run lock, source retries, and fault injection over the full cycle, including an LLM outage (T15) and the error taxonomy (T9).

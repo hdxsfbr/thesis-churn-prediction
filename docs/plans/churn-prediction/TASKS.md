@@ -685,6 +685,8 @@ Conventions for every ticket:
 
 **Covers:** R8.1, R8.2.
 
+**Status (2026-10-23):** merged as !43 and shipped in wave 11. The migration is V020, not V012. Builder reported 228 passed, 5 deselected, 1 warning, and ruff passing on the T19 base. Pipeline 66564 passed on the rebased branch. A checkpointed recovery is not a live process kill.
+
 ---
 
 ## T21 — FastAPI service: health, readiness, trigger and inspect runs
