@@ -27,3 +27,8 @@
 
 - T4 took four attempts because earlier attempts were never merged and main had no T4 code. Before building, check that main actually contains the dependencies, and follow ARCHITECTURE 4.2 column names from the start.
 - T5 runtime config added migration V004 and RunResult gate_mode/agent_halted. Keep adding new migrations with the next version number and keep RunResult/runner edits additive; check config error handling (gate invalid -> approve_all, others -> agent_halt, DEGRADED run) before changing it.
+
+### churn-prediction, wave 6 (2026-10-23)
+
+- Preserve scored archetype_low_conf alongside the policy confidence threshold (OR them), require explicit positive finite default priors for every enabled arm, and test critical escalation and a hard floor(N × share) exploration budget when extending policy/registry behavior.
+- Keep T29's latent_archetypes interface and independent [seed,4242]/[seed,4243] streams stable; verify all eight mappings and non-stub feature coverage after generator changes. Tiny profile/default-suite success is not full-scale or live Snowflake proof: T27 owns volume/throughput, T30 full-source re-evaluation, and A10 live verification.
