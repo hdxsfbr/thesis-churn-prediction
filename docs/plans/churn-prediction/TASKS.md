@@ -652,6 +652,8 @@ Conventions for every ticket:
 
 **Covers:** R5.5, R6.1, R6.5.
 
+**Status (2026-10-23):** merged as !40 and shipped in wave 10. Metrics are rows in the existing V018 `RUN_METRICS`, not V011. After rebasing onto main the default suite was 221 passed, 5 deselected, 1 warning, and ruff passing. The slow evaluation was 2 passed in 15.11s. A synthetic coverage or autonomy result is not the 90-day impact target.
+
 ---
 
 ## T20 — Failure recovery: step/shard checkpoints, run lock, fault injection
@@ -789,6 +791,8 @@ Conventions for every ticket:
 - `test_snowflake_smoke.py::test_migrate_and_small_cycle` (marker snowflake, skipped without SNOWFLAKE_* env)
 
 **Covers:** R1.5, A10.
+
+**Status (2026-10-23):** merged as !41 and shipped in wave 10. The migration stayed V013. Builder reported 221 passed, 4 deselected, 1 warning, and ruff passing. The live smoke was skipped because `SNOWFLAKE_*` was unset. A skipped smoke test is not live Snowflake proof.
 
 ---
 
