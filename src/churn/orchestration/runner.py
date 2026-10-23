@@ -10,8 +10,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 import pandas as pd
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from churn.agent.cycle import run_agent
+from churn.agent.cycle import run_agent, shard_of
 from churn.contract.loader import contract_for
 from churn.contract.validate import validate
 from churn.contract.views import populate_key_map
@@ -23,8 +24,9 @@ from churn.feedback.outcomes import close_outcomes
 from churn.feedback.policy_stats import update_posteriors
 from churn.model.registry import load_promoted
 from churn.model.score import score_frame
-from churn.obs.errors import classify, runbook_hint
+from churn.obs.errors import SourceUnavailable, classify, runbook_hint
 from churn.obs.logging import get_logger
+from churn.orchestration.lock import acquire, release
 from churn.runtime_config import RuntimeConfig, load_pinned
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
@@ -84,16 +86,91 @@ def _write_run(wh: Warehouse, ops: str, **fields) -> None:
     wh.merge_frame(f"{ops}.RUNS", pd.DataFrame([fields]), keys=["run_id"])
 
 
+def _retry_source(fn, /, *args, **kwargs):
+    """Three attempts, then the source error. The wait stays short so a failed read does not stall a test."""
+    wrapped = retry(
+        retry=retry_if_exception_type(SourceUnavailable),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.01, min=0.01, max=0.05),
+        reraise=True,
+    )(fn)
+    return wrapped(*args, **kwargs)
+
+
+def _done(wh: Warehouse, ops: str, run_id: str, step: str, shard: int = 0) -> bool:
+    rows = wh.query(
+        f"SELECT status FROM {ops}.RUN_STEPS WHERE run_id = :r AND step = :s AND shard = :h",
+        {"r": run_id, "s": step, "h": shard},
+    )
+    return not rows.empty and rows.iloc[0]["status"] == "done"
+
+
+def _mark(wh: Warehouse, ops: str, run_id: str, step: str, shard: int = 0, rows: int | None = None) -> None:
+    wh.merge_frame(
+        f"{ops}.RUN_STEPS",
+        pd.DataFrame([{
+            "run_id": run_id,
+            "step": step,
+            "shard": shard,
+            "status": "done",
+            "rows_written": rows,
+            "attempt": 1,
+            "error_class": None,
+            "error_msg": None,
+            "updated_at": datetime.now(),
+        }]),
+        keys=["run_id", "step", "shard"],
+    )
+
+
+def _log_counts(wh: Warehouse, ops: str, run_id: str) -> tuple[int, int, int]:
+    row = wh.query(
+        f"""SELECT COUNT(*) AS decided,
+                   COALESCE(SUM(CASE WHEN approval_status = 'PENDING' THEN 1 ELSE 0 END), 0) AS queued,
+                   COALESCE(SUM(CASE WHEN execution_status = 'DISPATCHED' THEN 1 ELSE 0 END), 0) AS dispatched
+            FROM {ops}.INTERVENTION_LOG WHERE run_id = :r""",
+        {"r": run_id},
+    ).iloc[0]
+    return int(row["decided"]), int(row["queued"]), int(row["dispatched"])
+
+
+def _before(wh: Warehouse, name: str, shard: int = 0) -> None:
+    hook = getattr(wh, "before_step", None)
+    if hook is not None:
+        hook(name, shard)
+
+
 def run_cycle(
     wh: Warehouse,
     settings: Settings,
     as_of: date | datetime,
     run_id: str | None = None,
     kind: str = "scheduled",
+    shards: int = 1,
+) -> RunResult:
+    run_id = run_id or default_run_id(as_of, kind)
+    as_of_dt = as_of_ts(as_of)
+    if not acquire(wh, settings, run_id):
+        return RunResult(run_id, "SKIPPED", as_of_dt, "", 0, 0)
+    try:
+        return _execute(wh, settings, as_of, run_id, kind, shards)
+    finally:
+        release(wh, settings, run_id)
+
+
+def _execute(
+    wh: Warehouse,
+    settings: Settings,
+    as_of: date | datetime,
+    run_id: str | None = None,
+    kind: str = "scheduled",
+    shards: int = 1,
 ) -> RunResult:
     ops = settings.schemas.ops
     run_id = run_id or default_run_id(as_of, kind)
     as_of_dt = as_of_ts(as_of)
+    prev = wh.query(f"SELECT status FROM {ops}.RUNS WHERE run_id = :r", {"r": run_id})
+    resume = not prev.empty and str(prev.iloc[0]["status"]) in {"FAILED", "RUNNING"}
     started = datetime.now()
     t0 = time.monotonic()
     base = {"run_id": run_id, "kind": kind, "as_of": as_of_dt, "started_at": started}
@@ -119,29 +196,59 @@ def run_cycle(
         with step("model"):
             version, _ = load_promoted(wh, settings)
         with step("count_active"):
-            active = count_active(wh, settings, contract, as_of_dt)
+            active = _retry_source(count_active, wh, settings, contract, as_of_dt)
         if active == 0:
             log.warning("zero_active_subscribers", step="count_active", as_of=as_of_dt.isoformat())
             with step("write_scores"):
                 wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
             scored = 0
             return _finish(wh, ops, base, t0, log, cfg, version, active, scored, 0, 0, 0, 0)
-        with step("features"):
-            features = build_features(wh, settings, contract, as_of_dt, current_status=True)
-        with step("score"):
-            frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
-
-        with step("write_scores"), wh.transaction():
-            populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)
-            wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
-            wh.merge_frame(f"{ops}.RISK_SCORES", frame, keys=["run_id", "subscriber_key"])
+        scores_done = resume and all(_done(wh, ops, run_id, "write_scores", s) for s in range(shards))
+        if scores_done:
             scored = int(
                 wh.query(f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id}).iloc[0]["n"]
             )
-            # Known gap (R8.1): if an earlier run with this run_id SUCCEEDED, this rollback restores its
-            # scores while RUNS says FAILED. Resolve with checkpoint/pinning work.
-            if scored != active:  # rolls the scores back
-                raise RunFailed(f"scored {scored} subscribers but {active} are active in the source", scored)
+        elif shards == 1:
+            with step("features"):
+                features = build_features(wh, settings, contract, as_of_dt, current_status=True)
+            with step("score"):
+                frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
+            with step("write_scores"), wh.transaction():
+                populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)
+                wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
+                wh.merge_frame(f"{ops}.RISK_SCORES", frame, keys=["run_id", "subscriber_key"])
+                scored = int(
+                    wh.query(
+                        f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id}
+                    ).iloc[0]["n"]
+                )
+                # A mismatch rolls the delete and the merge back together. The checkpoint stays unmarked.
+                if scored != active:
+                    raise RunFailed(f"scored {scored} subscribers but {active} are active in the source", scored)
+            _mark(wh, ops, run_id, "write_scores", 0, scored)
+        else:
+            with step("features"):
+                features = build_features(wh, settings, contract, as_of_dt, current_status=True)
+            with step("score"):
+                frame = score_frame(wh, settings, features, run_id, as_of_dt, cfg)
+            with step("write_scores"):
+                populate_key_map(wh, contract, settings.key_pepper, settings.schemas.private)
+                if not any(_done(wh, ops, run_id, "write_scores", s) for s in range(shards)):
+                    wh.execute(f"DELETE FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
+                for s in range(shards):
+                    if resume and _done(wh, ops, run_id, "write_scores", s):
+                        continue
+                    part = frame.loc[frame["subscriber_key"].map(lambda key, s=s: shard_of(key, shards) == s)]
+                    if not part.empty:
+                        wh.merge_frame(f"{ops}.RISK_SCORES", part, keys=["run_id", "subscriber_key"])
+                    _mark(wh, ops, run_id, "write_scores", s, len(part))
+                scored = int(
+                    wh.query(
+                        f"SELECT COUNT(*) AS n FROM {ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id}
+                    ).iloc[0]["n"]
+                )
+                if scored != active:
+                    raise RunFailed(f"scored {scored} subscribers but {active} are active in the source", scored)
 
         # Process approver edits, then decide, gate and dispatch. Skipped when the agent is halted (invalid
         # tiers/guardrails). In approve_all mode (invalid gate) the gate sends every decision to approval.
@@ -157,17 +264,35 @@ def run_cycle(
         if not cfg.agent_halt:
             with step("approvals"):
                 process_approvals(wh, settings)
-            with step("agent"):
-                decisions = run_agent(wh, settings, run_id, cfg)
-                holdout_n = int(wh.query(
-                    f"SELECT COUNT(*) AS n FROM {ops}.INTERVENTION_LOG "
-                    "WHERE run_id = :r AND intervention_type = 'HOLDOUT'",
-                    {"r": run_id},
-                ).iloc[0]["n"])
-                decided = len(decisions) + holdout_n
-                queued = sum(d.needs_approval for d in decisions)
-                dispatched = dispatch(wh, settings, decisions)  # rows written to the outbox
+            agent_done = shards == 1 and resume and _done(wh, ops, run_id, "agent", 0)
+            if agent_done:
+                with step("agent"):
+                    decided, queued, dispatched = _log_counts(wh, ops, run_id)
+            elif shards == 1:
+                with step("agent"):
+                    _before(wh, "agent", 0)
+                    decisions = run_agent(wh, settings, run_id, cfg)
+                    holdout_n = int(wh.query(
+                        f"SELECT COUNT(*) AS n FROM {ops}.INTERVENTION_LOG "
+                        "WHERE run_id = :r AND intervention_type = 'HOLDOUT'",
+                        {"r": run_id},
+                    ).iloc[0]["n"])
+                    decided = len(decisions) + holdout_n
+                    queued = sum(d.needs_approval for d in decisions)
+                    dispatched = dispatch(wh, settings, decisions)  # rows written to the outbox
+                _mark(wh, ops, run_id, "agent", 0, decided)
+            else:
+                with step("agent"):
+                    for s in range(shards):
+                        if resume and _done(wh, ops, run_id, "agent", s):
+                            continue
+                        _before(wh, "agent", s)
+                        decisions = run_agent(wh, settings, run_id, cfg, shard=s, n_shards=shards)
+                        dispatch(wh, settings, decisions)
+                        _mark(wh, ops, run_id, "agent", s, len(decisions))
+                    decided, queued, dispatched = _log_counts(wh, ops, run_id)
             with step("outcomes"):
+                _before(wh, "outcomes", 0)
                 close_outcomes(wh, settings, as_of_dt, cfg)
             # Decide already read POLICY_STATS. Folding after that pins this run's posteriors.
             with step("policy_update"):

@@ -30,6 +30,14 @@ def decision_id(run_id: str, subscriber_key: str) -> str:
     return hashlib.sha256(f"{run_id}|{subscriber_key}".encode()).hexdigest()
 
 
+def shard_of(subscriber_key: str, n_shards: int) -> int:
+    """Stable shard. One shard keeps every key on shard 0."""
+    if n_shards <= 1:
+        return 0
+    digest = hashlib.sha256(subscriber_key.encode()).digest()
+    return int.from_bytes(digest[:4], "big") % n_shards
+
+
 @dataclass(frozen=True)
 class Decision:
     decision_id: str
@@ -160,8 +168,14 @@ def decide(contexts: list[AgentContext], registry: dict[str, InterventionType],
     ]
 
 
-def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig) -> list[Decision]:
-    """Read this run's scores, build contexts for the at-risk tiers, decide and gate (approval vs outbox)."""
+def run_agent(
+    wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig, *,
+    shard: int = 0, n_shards: int = 1,
+) -> list[Decision]:
+    """Read this run's scores, build contexts for the at-risk tiers, decide and gate (approval vs outbox).
+
+    ``n_shards > 1`` keeps only the keys in ``shard`` and deletes coverage gaps for those keys only.
+    """
     scores = wh.query(f"SELECT * FROM {settings.schemas.ops}.RISK_SCORES WHERE run_id = :r", {"r": run_id})
     if cfg.agent_halt:
         return []
@@ -194,6 +208,10 @@ def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig
                 email_open_rate=float(rate) if pd.notna(rate) else None,
                 archetype_probs=json.loads(probs) if isinstance(probs, str) else {}))
             feature_rows[c.subscriber_key] = f
+    shard_keys = None
+    if n_shards > 1:
+        enriched = [c for c in enriched if shard_of(c.subscriber_key, n_shards) == shard]
+        shard_keys = [c.subscriber_key for c in enriched]
     enriched = apply_holdout(wh, settings, enriched, cfg)
     rows = wh.query(f'SELECT * FROM {settings.schemas.ops}.POLICY_STATS')
     stats = {(r.archetype, r.intervention_type, r.context_bucket): (r.alpha, r.beta)
@@ -231,7 +249,15 @@ def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig
             "created_at": ctx.as_of,
         })
     ops = settings.schemas.ops
-    wh.execute(f"DELETE FROM {ops}.COVERAGE_GAPS WHERE run_id = :r", {"r": run_id})
+    if shard_keys is None:
+        wh.execute(f"DELETE FROM {ops}.COVERAGE_GAPS WHERE run_id = :r", {"r": run_id})
+    elif shard_keys:
+        marks = ", ".join(f":k{i}" for i in range(len(shard_keys)))
+        params = {"r": run_id, **{f"k{i}": key for i, key in enumerate(shard_keys)}}
+        wh.execute(
+            f"DELETE FROM {ops}.COVERAGE_GAPS WHERE run_id = :r AND subscriber_key IN ({marks})",
+            params,
+        )
     if gaps:
         wh.merge_frame(f"{ops}.COVERAGE_GAPS", pd.DataFrame(gaps), keys=["run_id", "subscriber_key"])
     return apply_gate(decisions, cfg)
