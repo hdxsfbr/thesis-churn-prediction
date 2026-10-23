@@ -58,6 +58,11 @@ class RetrainSettings(BaseModel):
     tolerance: float = Field(default=0.01, gt=0, le=1)
 
 
+class ScheduleSettings(BaseModel):
+    cron: str = "0 6 * * *"
+    retrain_cron: str = "0 6 * * 1"
+
+
 class Settings(BaseModel):
     backend: str = "duckdb"
     warehouse: WarehouseSettings = WarehouseSettings()
@@ -69,6 +74,7 @@ class Settings(BaseModel):
     synth: SynthSettings = SynthSettings()
     model: ModelSettings = ModelSettings()
     retrain: RetrainSettings = RetrainSettings()
+    schedule: ScheduleSettings = ScheduleSettings()
     # Secret: env only, never read from YAML.
     key_pepper: str = ""
 

@@ -23,6 +23,7 @@ dependencies = [
   "tenacity>=8",
   "fastapi>=0.115.6,<0.116",
   "uvicorn>=0.32,<0.35",
+  "apscheduler>=3.10,<4",
 ]
 
 [project.optional-dependencies]
