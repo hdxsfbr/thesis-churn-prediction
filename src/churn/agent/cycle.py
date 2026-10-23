@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from churn.agent.content import build_content
+from churn.agent.content import load_stored, resolve_contents
 from churn.agent.context import PENDING, AgentContext, build_contexts
 from churn.agent.gate import GateResult, apply_gate, cost_of
 from churn.agent.guardrails import facts_for_contexts, filter_arms, gap_reason
@@ -120,7 +120,7 @@ class Decision:
 
 def decide(contexts: list[AgentContext], registry: dict[str, InterventionType],
            policy_config: PolicyConfig | None = None, stats: dict | None = None, *,
-           arms_for=None) -> list[Decision]:
+           arms_for=None, stored: dict | None = None, settings: Settings | None = None) -> list[Decision]:
     """Stable key order and a hard per-run exploration budget over the subscribers who still have an arm.
 
     ``arms_for(context) -> (registry, removal events)`` drops ineligible arms first. An empty registry
@@ -139,17 +139,24 @@ def decide(contexts: list[AgentContext], registry: dict[str, InterventionType],
         prepared.append((c, kept, removed))
     budgets = {r: math.floor(sum(c.run_id == r for c, _, _ in prepared) * cfg.max_explore_share)
                for r in {c.run_id for c, _, _ in prepared}}
-    decisions = []
+    chosen = []
     for c, kept, removed in prepared:
         selection = select(c, kept, cfg, stats or {}, allow_explore=budgets[c.run_id] > 0)
         budgets[c.run_id] -= int(selection.explore)
         if removed:
             selection = replace(selection, removed=tuple(removed))
         intervention = kept[selection.chosen]
-        decisions.append(Decision(decision_id(c.run_id, c.subscriber_key), c, intervention,
-                                  intervention.action(c), build_content(intervention, c), policy=selection,
-                                  guardrail_events=tuple(removed)))
-    return decisions
+        chosen.append((c, intervention, intervention.action(c), selection, removed))
+    contents = resolve_contents(
+        [(intervention, c, action, decision_id(c.run_id, c.subscriber_key))
+         for c, intervention, action, _, _ in chosen],
+        stored=stored, settings=settings,
+    )
+    return [
+        Decision(decision_id(c.run_id, c.subscriber_key), c, intervention, action, content,
+                 policy=selection, guardrail_events=tuple(removed))
+        for (c, intervention, action, selection, removed), content in zip(chosen, contents, strict=True)
+    ]
 
 
 def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig) -> list[Decision]:
@@ -206,7 +213,8 @@ def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig
         events_by_key[ctx.subscriber_key] = events
         return kept, events
 
-    decisions = decide(enriched, registry, cfg.policy, stats, arms_for=arms_for)
+    decisions = decide(enriched, registry, cfg.policy, stats, arms_for=arms_for,
+                       stored=load_stored(wh, settings, run_id), settings=settings)
     decided = {d.context.subscriber_key for d in decisions}
     gaps = []
     for ctx in enriched:

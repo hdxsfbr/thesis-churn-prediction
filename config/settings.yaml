@@ -38,3 +38,15 @@ model:
     subsample: 0.8
     subsample_freq: 1
     colsample_bytree: 0.8
+
+# Email copy. provider anthropic uses ANTHROPIC_API_KEY; openai uses OPENAI_API_KEY.
+# No key means every email stays on its template. Keys are never read from this file.
+llm:
+  provider: anthropic
+  model: claude-haiku-4-5
+  max_calls_per_run: 2000
+  concurrency: 8
+  timeout_s: 20
+  max_subject_chars: 140
+  max_body_chars: 2000
+  retries: 3
