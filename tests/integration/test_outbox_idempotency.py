@@ -29,6 +29,10 @@ def test_replaying_run_creates_no_duplicate_outbox_rows(pipeline):
     assert out1.equals(out2)  # insert-only: first write wins, created_at untouched
     assert log1.equals(log2)
     assert again.dispatched == len(out2)  # only rows written to the outbox count; gated ones are `queued`
-    assert again.queued == again.decided - again.dispatched
+    holdout = int(wh.query(
+        "SELECT COUNT(*) AS n FROM CHURN_OPS.INTERVENTION_LOG "
+        "WHERE run_id = 't-replay' AND intervention_type = 'HOLDOUT'"
+    ).iloc[0]["n"])
+    assert again.queued + again.dispatched + holdout == again.decided
     total = wh.query("SELECT COUNT(*) AS n, COUNT(DISTINCT outbox_id) AS d FROM CHURN_OPS.OUTBOX").iloc[0]
     assert total["n"] == total["d"]
