@@ -180,6 +180,8 @@ Both need T16's outcomes.
 
 ## Wave 12 — API service
 
+**Status (2026-10-23):** !45 (T21) is open. The builder count of 233 passed is from the pre-rebase base, not a new combined suite. The key is required on every route. There is no approval route.
+
 **Tickets:** T21
 
 **Goal:** health, readiness, triggering runs behind the lock (T20) and inspecting runs and metrics (T19) over FastAPI.

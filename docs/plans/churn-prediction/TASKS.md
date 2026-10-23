@@ -714,6 +714,8 @@ Conventions for every ticket:
 
 **Covers:** R8.6.
 
+**Status (2026-10-23):** merge request !45. Builder reported 233 passed, 5 deselected, 1 warning, and ruff passing on the pre-rebase base. The API key is required on every route, including `/health`. There is no approval route.
+
 ---
 
 ## T22 — Scheduled operation: worker with daily cycle, retrain cron and catch-up
