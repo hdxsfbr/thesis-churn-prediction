@@ -12,6 +12,11 @@
 
 ## Lessons
 
+### churn-prediction, wave 5 (2026-10-22)
+
+- When changing runner logging or gate wiring, retain a regression asserting returned RunResult and persisted RUNS queued counts equal approval rows, and reconcile → approvals → agent step order. Test retention-offer cost with the selected Action as well as AgentContext; four-path fixtures must use real active pseudonymous subscriber keys without weakening stale-source checks.
+- For T30, compare full-source evaluation against T8's small-scale baseline of 55,536 holdout rows; preserve validation-only boundary selection and the 30-day split purge. Assert validation recall and holdout recall/precision in both report and model card, not just the report; synthetic PASS is not evidence of real-world accuracy or the 90-day impact target.
+
 ### churn-prediction, wave 1 (2026-10-20)
 
 - cli.py (11 tickets) and orchestration/runner.py (9) are shared hot files; check TASKS.md "Shared files" before building a ticket and keep edits to those files minimal and additive to avoid merge conflicts.
