@@ -142,7 +142,26 @@ FEATURES: tuple[Feature, ...] = (
       "min(tenure, 90)", "NULL when no quiz or no prior window yet (tenure <= 90 days)",
       "Quiz retakes changed by {value} per 90 days versus the prior 90 days", "slope", windows=(90, 90),
       trend=True),
+    # --- interventions (from CHURN_OPS.INTERVENTION_LOG; holdout is not a contact) ---
+    F("n_interventions_90d", "interventions",
+      "Dispatched interventions in the 90 days before as_of. Holdout rows are not contacts",
+      "0", "{value} in the last 90 days", "count", windows=(90,)),
+    F("last_intervention_type", "interventions",
+      "Latest dispatched intervention before as_of, encoded as checkin_email=1, formulation=2, "
+      "retention_offer=3, escalation=4",
+      "NULL when none has been dispatched", "Last intervention code is {value}", "number"),
+    F("days_since_last_intervention", "interventions",
+      "Days since the latest dispatched intervention before as_of",
+      "NULL when none has been dispatched", "Last intervention was {value} ago", "days"),
 )
+
+# Stable codes for last_intervention_type. SQL returns the name; the builder maps it before the model sees it.
+INTERVENTION_TYPE_CODE = {
+    "checkin_email": 1.0,
+    "formulation": 2.0,
+    "retention_offer": 3.0,
+    "escalation": 4.0,
+}
 
 FEATURE_COLUMNS: list[str] = [f.name for f in FEATURES]
 KEY_COLUMNS: list[str] = ["subscriber_key", "subscription_id"]

@@ -77,3 +77,11 @@ Leading indicators (ARCHITECTURE 6.2) are marked **leading**.
 | `days_since_last_quiz` | point in time | Days since the latest quiz answer | NULL when no quiz | **leading** |
 | `quiz_retake_count_365` | 365 d | Quiz sessions started in the last 365 days, not counting the very first session ever | 0 |  |
 | `quiz_retake_trend_90` | last 90 d vs prior 90 d | Quiz sessions per 90 days in the recent 90 days minus the prior 90 days, each window normalised by min(tenure, 90) | NULL when no quiz or no prior window yet (tenure <= 90 days) | trend |
+
+## interventions
+
+| Feature | Windows | Description | Missing data | Kind |
+|---|---|---|---|---|
+| `n_interventions_90d` | 90 d | Dispatched interventions in the 90 days before as_of. Holdout rows are not contacts | 0 |  |
+| `last_intervention_type` | point in time | Latest dispatched intervention before as_of, encoded as checkin_email=1, formulation=2, retention_offer=3, escalation=4 | NULL when none has been dispatched |  |
+| `days_since_last_intervention` | point in time | Days since the latest dispatched intervention before as_of | NULL when none has been dispatched |  |
