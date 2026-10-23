@@ -1,6 +1,6 @@
 # Deployment
 
-One `python:3.12-slim` image serves both processes. `api` runs `churn serve`. `worker` runs `churn worker`. The image user is `churn`, not root. LightGBM needs `libgomp1`, which the image installs.
+One `python:3.12-slim` image serves both processes. `api` runs `churn serve`. `worker` runs `churn worker`. The image user is `churn`, not root. LightGBM needs `libgomp1`, which the image installs. The image also installs the `snowflake` extra so `CHURN_BACKEND=snowflake` can open the warehouse.
 
 This sandbox does not run Docker. The steps below are the operator checklist. A successful live cycle is not claimed here.
 

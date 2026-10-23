@@ -10,7 +10,7 @@ COPY src ./src
 COPY config ./config
 COPY sql ./sql
 
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir ".[snowflake]" \
     && useradd --create-home --uid 1000 churn \
     && chown -R churn:churn /app
 

@@ -59,6 +59,7 @@ def test_dockerfile_non_root_and_python_312():
     assert users
     assert users[-1] != "root"
     assert "libgomp1" in text
+    assert ".[snowflake]" in text
 
 
 def test_env_example_lists_every_settings_env_var():
