@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 
 import pandas as pd
@@ -13,6 +13,7 @@ import pandas as pd
 from churn.agent.content import build_content
 from churn.agent.context import PENDING, AgentContext, build_contexts
 from churn.agent.gate import GateResult, apply_gate, cost_of
+from churn.agent.guardrails import facts_for_contexts, filter_arms, gap_reason
 from churn.agent.policy import PolicyConfig, PolicyContext, Selection, select
 from churn.agent.rationale import build as build_rationale
 from churn.execution.approvals import payload_hash
@@ -37,6 +38,7 @@ class Decision:
     content: Content
     gate: GateResult | None = None  # None: not gated (autonomous)
     policy: Selection | None = None
+    guardrail_events: tuple = ()  # removals that still left at least one arm
 
     @property
     def needs_approval(self) -> bool:
@@ -65,7 +67,9 @@ class Decision:
         pending = self.needs_approval
         dropped = not pending and stale_reason is not None
         sent = not pending and not dropped
-        events = [{"event": "CANCELLED_STALE", "reason": stale_reason, "at": decided_at.isoformat()}] if dropped else []
+        events = list(self.guardrail_events)
+        if dropped:
+            events.append({"event": "CANCELLED_STALE", "reason": stale_reason, "at": decided_at.isoformat()})
         return {
             "decision_id": self.decision_id,
             "subscriber_key": c.subscriber_key,
@@ -115,18 +119,36 @@ class Decision:
 
 
 def decide(contexts: list[AgentContext], registry: dict[str, InterventionType],
-           policy_config: PolicyConfig | None = None, stats: dict | None = None) -> list[Decision]:
-    """Stable key order and a hard per-run exploration budget (including small batches)."""
+           policy_config: PolicyConfig | None = None, stats: dict | None = None, *,
+           arms_for=None) -> list[Decision]:
+    """Stable key order and a hard per-run exploration budget over the subscribers who still have an arm.
+
+    ``arms_for(context) -> (registry, removal events)`` drops ineligible arms first. An empty registry
+    produces no decision (the caller writes the coverage gap).
+    """
     cfg = policy_config or PolicyConfig(**defaults()['policy'])
-    budgets = {r: math.floor(sum(c.run_id == r for c in contexts) * cfg.max_explore_share)
-               for r in {c.run_id for c in contexts}}
-    decisions = []
+    prepared = []
     for c in sorted(contexts, key=lambda c: (c.run_id, c.subscriber_key)):
-        selection = select(c, registry, cfg, stats or {}, allow_explore=budgets[c.run_id] > 0)
+        kept, removed = (registry, ()) if arms_for is None else arms_for(c)
+        if not kept:
+            continue
+        low = (getattr(c, "archetype_low_conf", False) or c.archetype_conf is None
+               or c.archetype_conf < cfg.low_confidence)
+        if low and c.tier == "critical" and "escalation" not in kept:
+            continue
+        prepared.append((c, kept, removed))
+    budgets = {r: math.floor(sum(c.run_id == r for c, _, _ in prepared) * cfg.max_explore_share)
+               for r in {c.run_id for c, _, _ in prepared}}
+    decisions = []
+    for c, kept, removed in prepared:
+        selection = select(c, kept, cfg, stats or {}, allow_explore=budgets[c.run_id] > 0)
         budgets[c.run_id] -= int(selection.explore)
-        intervention = registry[selection.chosen]
+        if removed:
+            selection = replace(selection, removed=tuple(removed))
+        intervention = kept[selection.chosen]
         decisions.append(Decision(decision_id(c.run_id, c.subscriber_key), c, intervention,
-                                  intervention.action(c), build_content(intervention, c), policy=selection))
+                                  intervention.action(c), build_content(intervention, c), policy=selection,
+                                  guardrail_events=tuple(removed)))
     return decisions
 
 
@@ -140,6 +162,7 @@ def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig
     from churn.contract.loader import contract_for
     from churn.features.builder import build_features
     enriched = []
+    feature_rows: dict[str, dict] = {}
     for as_of, group in scores.groupby('as_of'):
         features = build_features(wh, settings, contract_for(settings), pd.Timestamp(as_of).to_pydatetime())
         by_key = features.set_index('subscriber_key').to_dict('index')
@@ -155,11 +178,50 @@ def run_agent(wh: Warehouse, settings: Settings, run_id: str, cfg: RuntimeConfig
             low_conf = row.get('archetype_low_conf')
             data['archetype_low_conf'] = bool(low_conf) if pd.notna(low_conf) else False
             probs = row.get('archetype_probs')
+            if cfg.guardrails is not None:
+                data["max_discount_pct"] = cfg.guardrails.max_discount_pct
+                data["offer_catalogue"] = tuple(cfg.guardrails.offer_catalogue)
             rate = f.get('email_open_rate_90')
             enriched.append(PolicyContext(**data, tenure_days=f.get('tenure_days', 0),
                 email_open_rate=float(rate) if pd.notna(rate) else None,
                 archetype_probs=json.loads(probs) if isinstance(probs, str) else {}))
+            feature_rows[c.subscriber_key] = f
     rows = wh.query(f'SELECT * FROM {settings.schemas.ops}.POLICY_STATS')
     stats = {(r.archetype, r.intervention_type, r.context_bucket): (r.alpha, r.beta)
              for r in rows.itertuples(index=False)}
-    return apply_gate(decide(enriched, load_registry(), cfg.policy, stats), cfg)
+    registry = load_registry()
+    facts = facts_for_contexts(wh, settings, enriched, feature_rows)
+    events_by_key: dict[str, list] = {}
+
+    def arms_for(ctx: AgentContext):
+        kept, events = filter_arms(ctx, registry, cfg.guardrails, facts.get(ctx.subscriber_key))
+        # select() raises when a critical low-confidence subscriber has no escalation arm left.
+        # Drop the decision here so the subscriber is recorded as a coverage gap instead.
+        threshold = cfg.policy.low_confidence if cfg.policy is not None else 1.0
+        low = (getattr(ctx, "archetype_low_conf", False) or ctx.archetype_conf is None
+               or ctx.archetype_conf < threshold)
+        if low and ctx.tier == "critical" and "escalation" not in kept:
+            events = [*events, {"event": "REMOVED", "arm": "escalation", "reason": "no_escalation"}]
+            kept = {}
+        events_by_key[ctx.subscriber_key] = events
+        return kept, events
+
+    decisions = decide(enriched, registry, cfg.policy, stats, arms_for=arms_for)
+    decided = {d.context.subscriber_key for d in decisions}
+    gaps = []
+    for ctx in enriched:
+        if ctx.subscriber_key in decided:
+            continue
+        events = events_by_key.get(ctx.subscriber_key, [])
+        gaps.append({
+            "run_id": ctx.run_id,
+            "subscriber_key": ctx.subscriber_key,
+            "reason": gap_reason(events),
+            "guardrail_events": json.dumps(events),
+            "created_at": ctx.as_of,
+        })
+    ops = settings.schemas.ops
+    wh.execute(f"DELETE FROM {ops}.COVERAGE_GAPS WHERE run_id = :r", {"r": run_id})
+    if gaps:
+        wh.merge_frame(f"{ops}.COVERAGE_GAPS", pd.DataFrame(gaps), keys=["run_id", "subscriber_key"])
+    return apply_gate(decisions, cfg)

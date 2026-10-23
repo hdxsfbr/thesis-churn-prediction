@@ -12,8 +12,9 @@ answered APPROVED or REJECTED are honoured while ``now < approval_grace_until`` 
 the next cycle (R5.3). The grace end is pinned in INTERVENTION_LOG.approval_grace_until at dispatch, so a later config
 edit cannot change it; a missing value falls back to the deadline plus 24 h.
 
-Eligibility re-check at execution: the subscriber must still be active in the source. Contact caps and email
-unsubscribes are not enforced yet because the guardrail work that defines them is a separate ticket.
+Eligibility re-check at execution: the subscriber must still be active in the source, still under the contact
+cap, and not unsubscribed when the action is email. A failure is ``CANCELLED_STALE`` with that reason and no
+outbox row. The cap is counted up to the decision's score ``as_of`` and does not count the decision itself.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from churn.agent.gate import DEFAULT_GRACE_H
+from churn.agent.guardrails import blocked_approvals
 from churn.contract.loader import contract_for
 from churn.contract.views import contract_ctes
 from churn.settings import Settings
@@ -195,10 +197,14 @@ def process(wh: Warehouse, settings: Settings, now: datetime | None = None) -> C
                 counts["INVALID_VALUE"] += 1
 
         stale = inactive_subscribers(wh, settings, [r["subscriber_key"] for r in candidates], now)
+        blocks = blocked_approvals(wh, settings, candidates, now)
         outbox: list[dict] = []
         for r in candidates:
             if r["subscriber_key"] in stale:
                 finish(r, "CANCELLED_STALE", "APPROVED", "APPROVED", "CANCELLED_STALE", STALE_REASON)
+                continue
+            if reason := blocks.get(r["decision_id"]):
+                finish(r, "CANCELLED_STALE", "APPROVED", "APPROVED", "CANCELLED_STALE", reason)
                 continue
             outbox.append({
                 "outbox_id": r["decision_id"], "channel": r["channel"], "intervention_type": r["intervention_type"],
