@@ -4,7 +4,7 @@ Input: `docs/plans/churn-prediction/TASKS.md` (tickets T1–T30). A wave is buil
 
 **Revision 2 (2026-10-21, change request during wave 5).** What changed in this file:
 - Waves 1–4 are finished and keep their numbers and tickets. T2 stays in wave 2 as the record of MR !5; it is superseded by T29 and not rebuilt.
-- **T8** (amended, MR !18 in progress) stays in wave 5, the current wave. T9, T11 and T14 stay in wave 5.
+- **T8** (amendment delivered in MR !23) stays in wave 5, now shipped. T9, T11 and T14 stay in wave 5.
 - **T29** (new) goes in wave 6. T27 (wave 7, quiz rows at full scale) and T16 (wave 8, reads `email_events` and redemptions through the contract) need all eight views mapped, so T29 has to come before them. T29 shares `src/churn/cli.py` with T8 (wave 5), T24 (wave 6) and T27 (wave 7).
 - **T24** moves from wave 6 to wave 10 to make room for T29. The operator chose this on 2026-10-21. Only T23 (wave 14) depends on T24, so it still comes first. In wave 10 T24 shares no file with T19.
 - **T30** (new) goes in wave 7. It needs T8 (wave 5) and T29 (wave 6), and its files are separate from those of T12, T15, T26 and T27.
@@ -83,6 +83,8 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 ## Wave 5 — widen model, agent and operations
 
 **Tickets:** T8, T9, T11, T14
+
+**Status (2026-10-22):** shipped. T9's audit recorded completed local repair evidence but left publication and remote CI pending; those historical caveats are superseded by this ship run's input confirming all wave tickets merged, default-branch pipeline [65604](https://labs.gauntletai.com/andrebatista/thesis-churn-prediction/-/pipelines/65604) passed, and the operator smoke tested the deployed app. Closure is based on that ship evidence, not local tests alone. The platform closed four tickets and released two for wave 6.
 
 **Goal:**
 - T8 (amended in Revision 2): the honest evaluation report and model card against the new R3.6 targets. The boundary is chosen on a validation split and the report shows ceilings from the measured base rate. It needs T7 for per-archetype metrics.

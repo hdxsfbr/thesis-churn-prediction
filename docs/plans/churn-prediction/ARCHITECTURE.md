@@ -250,7 +250,7 @@ All tables are created by `sql/migrations/V00x__*.sql`, applied by `churn migrat
 | `OUTCOMES` | decision_id | response (opened/clicked/redeemed/none), outcome (retained/churned/unknown), measured_at, window_days |
 | `POLICY_STATS` | archetype, intervention_type, context_bucket | alpha, beta (Beta posterior), n, last_updated_run |
 | `RUN_METRICS` | run_id, metric | coverage, autonomy_rate, audit_completeness, at-risk count, LLM calls, fallbacks, duration, treated-vs-control churn |
-| `EVAL_REPORTS` | report_id | model and archetype evaluation results (T8, `V005`). Periods, counts, metrics and per-target PASS/MISS rows are stored as JSON, so the Revision 2 metrics need no new migration |
+| `EVAL_REPORTS` | report_id | model and archetype evaluation results (T8, `V005`). Periods, counts, metrics and per-target PASS/MISS rows are stored in `metrics_json` and `targets_json`; Revision 2 adds the boundary, precision at the boundary, ceilings and split row counts there, with no new migration |
 | `DATA_PROFILE` | profiled_at, section, item | synthetic data profile (T29, `V015__data_profile.sql`): sections `rows` (per view), `edge_case` (share per category) and `churn_timeline` (voluntary/involuntary per month), each with value, scale and seed |
 
 **Wave 6 as built.** `sql/migrations/V016__policy_stats.sql` creates POLICY_STATS empty (V008 is a historical hole; V015 belongs to T29). Missing observations use run-pinned priors, not seeded table rows. DATA_PROFILE's actual columns are `profiled_at, section, item, value, scale, seed`. Counts include duplicate source rows; edge shares count affected subscribers and overlap. Offset share counts customers with emitted offset-bearing email events, not retained database display offsets. The CLI appends profile snapshots and overwrites the Markdown report.
@@ -305,10 +305,11 @@ Leakage (R2.3): all SQL is parameterised on `:as_of`, and the test appends post-
 - **Tiers** come from the runtime config boundaries (R3.4).
 - **Evaluation** (`model.evaluate`, `churn evaluate`; amended in Revision 2 for R3.6 and D4–D8) writes `docs/model-card.md`, `docs/eval-report.md` and `EVAL_REPORTS`.
   - *Splits.* The `build_dataset()` snapshots are split by date into training, validation and holdout (A1). An **evaluation model** is fitted with `train.fit()` on the training split only. It uses the same features and hyperparameters as `churn train` and is neither registered nor promoted. It scores the validation and holdout splits. The model card states that the production model is refit on all snapshots and that the reported metrics come from this evaluation fit.
+  - *Purge as built (T8).* With month-end snapshots and a 30-day horizon, the snapshot immediately before each split is dropped when the gap is 30 days or less. On `small`, validation retains 2024-11-30 and 2024-12-31; 2024-10-31 and 2025-01-31 are purged.
   - *Unit.* A holdout row is one (subscriber, snapshot) pair, pooled over the holdout snapshots. Rows are ranked by calibrated `churn_prob` descending, with ties broken by `subscriber_key` and then `snapshot_date`, so every metric is deterministic.
   - *Base rate* b = positives / rows in the holdout.
   - *Top-share precision* = positives among the top ⌈0.02 · n⌉ rows, divided by that count (`TOP_SHARE=0.02`). *Top-decile precision* is the same with 0.10, and *top-decile lift* = top-decile precision / b.
-  - *Pre-cancellation recall at threshold t* = the share of churners with score ≥ t. Each voluntary churner counts once, through its latest positive snapshot in the split, which is its last score before cancelling.
+  - *Pre-cancellation recall at threshold t* = the share of churners with score ≥ t. Each voluntary churner counts once. Validation uses each churner's latest positive snapshot. On the holdout, the score is the last holdout score strictly before the voluntary cancellation date; the recall breakdown is caught / no score / below boundary.
   - *Boundary (D7, D8).* Sort the **validation** churner scores descending, s₁ ≥ … ≥ sₖ. The boundary is t* = s₍⌈0.65·k⌉₎, the highest threshold whose validation recall is ≥ 0.65 (`BOUNDARY_MIN_RECALL=0.65`). The function's signature takes the validation frame alone, so holdout data cannot move the boundary.
     - If the validation split has fewer than `MIN_VALIDATION_CHURNERS=20` churners, or no scored churner, there is no boundary, and the recall target is MISS with that reason. The code never falls back to the holdout or to the runtime 0.20 boundary.
     - On the holdout, the report gives recall at t* (the target) and precision at t* = positives / rows with score ≥ t* (reported, with no target), each with its counts.
@@ -351,6 +352,7 @@ Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score ro
 
 ### 6.5 Gate, approvals, outbox (R5.1–R5.4, R4.5, D2, D3)
 - **Gate** (`gate.py`): `needs_approval = risk ≥ T_risk or cost ≥ T_cost or discount_pct ≥ T_discount or type in always_approve`. The thresholds are read from the run's config snapshot. In `approve_all` mode (invalid config), everything goes to approval. Escalation is itself a human hand-off, so it goes to the outbox with `channel = human_queue` unless configured otherwise.
+- **Cost compatibility as built (T9 repair):** retention offers accept the selected `Action` for gate cost while retaining `AgentContext` callers. Catalogue cost semantics and thresholds are unchanged. Successful `RUNS` and returned `RunResult` preserve queued counts.
 - **Autonomous** → `OUTBOX` row (`outbox_id = decision_id`, MERGE insert-only), `INTERVENTION_LOG.execution_status = DISPATCHED`.
 - **Needs approval** → `APPROVALS` row (`DECISION = PENDING`, `expires_at = decided_at + expiry_hours`, `payload_hash` = sha256 of the proposed action) and log `approval_status = PENDING`, no outbox row (R5.1 AC). As built in T14, the deadline is also written to `INTERVENTION_LOG.approval_expires_at`. The approver cannot edit that copy, so the agent uses it and ignores `APPROVALS.expires_at`.
 - **`process_approvals`** (start of each agent step):
@@ -390,7 +392,9 @@ Per at-risk subscriber, `agent.cycle` builds an `AgentContext` from the score ro
 - **Docker**: one `python:3.12-slim` image with a non-root user, used by both services (`api`: uvicorn; `worker`: scheduler). `docker-compose.yml` reads `.env` (and `.env.example` documents every variable). Snowflake credentials are supplied via env, preferably as a key-pair file mounted as a secret. The local profile uses `CHURN_BACKEND=duckdb` with a volume.
 - **Logging**: structlog JSON to stdout with `ts, level, component, run_id, step, event, error_class`.
   - The error taxonomy in `obs/errors.py` is `SourceUnavailable`, `ContractError`, `ConfigError`, `WarehouseWriteError`, `LLMError`, `GuardrailBlocked`, `ModelError`.
-  - A logging processor redacts values matching email or phone patterns as a backstop, and only `subscriber_key` is ever bound.
+  - A logging processor redacts values matching email or phone patterns as a backstop, and only `subscriber_key` is ever bound. As built in T9, nested values are redacted while ISO dates/datetimes are preserved.
+  - `get_logger` lazily configures JSON logging if not already configured. Optional context fields are bound when supplied; `error_class` is emitted on error records. Taxonomy classification matches class names along the exception MRO.
+  - The runner's `_Steps` wrapper emits step start/end records (with duration) and classified failures. The execution order is reconcile → approvals → agent; the queued-count/order regression preserves both persisted and returned counts.
 
 ## 8. Failure and edge cases
 
@@ -491,7 +495,7 @@ All tests run with `python -m pytest` from the repo root, with no network or cre
 
 ## 13. Revision 2 ticket plan (for TASKS.md and WAVES.md)
 
-Waves 1–4 are shipped, and wave 5 (T8, T9, T11, T14) is in progress. No merged ticket's scope changes, except T2 (superseded) and T8 (amended, still in progress) as stated below.
+Waves 1–5 are shipped. T8's Revision 2 amendment was delivered in MR !23. No merged ticket's scope changes, except T2 (superseded) and T8 (amended) as stated below.
 
 ### 13.1 T29 — Rebuild the full synthetic source on main and map every contract view (supersedes T2)
 
@@ -533,7 +537,7 @@ One ticket covers both R1.7 and R1.6. The mapping cannot be validated or tested 
 
 **Covers:** R1.1, R1.2 (content), R1.6, R1.7.
 
-### 13.2 T8 amendment (in progress, wave 5, MR !18)
+### 13.2 T8 amendment (delivered, wave 5, MR !23)
 
 The scope stays "evaluation report and model card with honest target check", and the files stay the same: `model/evaluate.py`, `V005__eval_reports.sql`, `cli.py`, `docs/eval-report.md`, `docs/model-card.md` and the two test files.
 
