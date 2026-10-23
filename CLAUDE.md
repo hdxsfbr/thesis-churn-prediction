@@ -33,6 +33,13 @@
 - T4 took four attempts because earlier attempts were never merged and main had no T4 code. Before building, check that main actually contains the dependencies, and follow ARCHITECTURE 4.2 column names from the start.
 - T5 runtime config added migration V004 and RunResult gate_mode/agent_halted. Keep adding new migrations with the next version number and keep RunResult/runner edits additive; check config error handling (gate invalid -> approve_all, others -> agent_halt, DEGRADED run) before changing it.
 
+### churn-prediction, wave 7 (2026-10-23)
+
+- Contact caps and pending approvals are point-in-time at the score `as_of`. Counting wall-clock `decided_at` exhausts the shared test warehouse, because dispatch stamps `datetime.now()`.
+- Email copy stays on the template unless a provider key and its SDK are both present. A rerun of the same `run_id` reuses the subject and body already on OUTBOX or APPROVALS.
+- Populations above 40,000 customers are generated in chunks. `tiny` and `small` stay one draw. `full` is 350,000. The measured DuckDB cycle was 54.67s for 215,649 actives. That is not a Snowflake timing.
+- The committed T30 evaluation is a 36,000-customer draw because `small` produced 53,056 holdout rows, under T8's 55,536. All three R3.6 targets PASS. A synthetic PASS is not real-world accuracy and does not settle the 90-day impact target.
+
 ### churn-prediction, wave 6 (2026-10-23)
 
 - Preserve scored archetype_low_conf alongside the policy confidence threshold (OR them), require explicit positive finite default priors for every enabled arm, and test critical escalation and a hard floor(N × share) exploration budget when extending policy/registry behavior.
