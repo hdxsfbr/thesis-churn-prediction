@@ -55,3 +55,8 @@
 
 - `policy_update` runs after outcomes and after decide. The stored posterior includes the prior. `policy.decay` defaults to 1. There is no applied-decision ledger and no new migration. A shift test needs a flat prior because the shipped efficacy prior already prefers formulation.
 - Retrain promotes only when top-decile precision and PR-AUC are each at least the current model minus 0.01. Rejection keeps the promoted row. `retrain.min_new_outcomes` is 100. Three history features use numeric type codes, holdout is excluded, and a closed treated outcome replaces the label. A one-row change on the tiny holdout can exceed 0.01. The weekly cron stays with the scheduler.
+
+### churn-prediction, wave 10 (2026-10-23)
+
+- Run metrics live in the existing V018 `RUN_METRICS` table. Coverage subtracts holdout from the denominator, and `RUNS.at_risk` stays the full count. The metrics step still runs when the agent is halted. The small-scale 45-day evaluation passing is not the 90-day impact target.
+- The Snowflake connector is an optional extra. V013 is the sender view `CHURN_OPS.OUTBOX_FOR_SENDER`. The grants script is not a migration and DuckDB bootstrap does not run it. `CHURN_APPROVER`'s only write grant is `UPDATE` on `APPROVALS`. A skipped `snowflake` test is not live proof.
