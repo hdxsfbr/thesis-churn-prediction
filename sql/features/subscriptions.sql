@@ -1,7 +1,8 @@
 -- Point-in-time features per active subscriber. Snowflake dialect.
 -- Template tokens (substituted by features.builder):
 --   {{contract_ctes}}  the source-contract CTEs (plus empty typed stubs for views the contract lacks)
---   {{domain_ctes}}    the per-domain CTEs from orders.sql, subscription_events.sql, email.sql, support.sql, quiz.sql
+--   {{domain_ctes}}    the per-domain CTEs from orders.sql, subscription_events.sql, email.sql, support.sql, quiz.sql,
+--                      interventions.sql (or an empty pair when the ops log table is absent)
 --   {{as_of}}          the bound :as_of parameter as a timestamp
 --   {{active_statuses}} the quoted active-status list from settings
 -- Leakage rule (R2.3): a row is visible only if its event time is < as_of and loaded_at <= as_of.
@@ -116,7 +117,11 @@ SELECT a.subscriber_key,
        CASE WHEN a.recent90_len > 0 AND a.prior90_len > 0 AND q.n_sessions IS NOT NULL
             THEN 90.0 * (COALESCE(q.sessions_90, 0) / CAST(a.recent90_len AS DOUBLE)
                          - COALESCE(q.sessions_prior90, 0) / CAST(a.prior90_len AS DOUBLE))
-       END AS quiz_retake_trend_90
+       END AS quiz_retake_trend_90,
+       -- interventions
+       COALESCE(i.n_90, 0) AS n_interventions_90d,
+       l.last_type AS last_intervention_type,
+       DATEDIFF(day, i.last_at, {{as_of}}) AS days_since_last_intervention
 FROM active a
 LEFT JOIN order_agg o ON o.subscriber_key = a.subscriber_key
 LEFT JOIN sub_event_agg s ON s.subscriber_key = a.subscriber_key
@@ -124,4 +129,6 @@ LEFT JOIN last_pause_state p ON p.subscriber_key = a.subscriber_key
 LEFT JOIN email_agg e ON e.subscriber_key = a.subscriber_key
 LEFT JOIN ticket_agg t ON t.subscriber_key = a.subscriber_key
 LEFT JOIN quiz_agg q ON q.subscriber_key = a.subscriber_key
+LEFT JOIN intervention_agg i ON i.subscriber_key = a.subscriber_key
+LEFT JOIN intervention_last l ON l.subscriber_key = a.subscriber_key
 ORDER BY a.subscriber_key

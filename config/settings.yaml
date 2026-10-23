@@ -40,6 +40,13 @@ model:
     subsample_freq: 1
     colsample_bytree: 0.8
 
+# A candidate is promoted when its holdout top-decile precision and PR-AUC stay within tolerance
+# of the current model. More than min_new_outcomes closed treated outcomes since that model also
+# marks a retrain as due. The weekly cron itself is the scheduler's.
+retrain:
+  min_new_outcomes: 100
+  tolerance: 0.01
+
 # Email copy. provider anthropic uses ANTHROPIC_API_KEY; openai uses OPENAI_API_KEY.
 # No key means every email stays on its template. Keys are never read from this file.
 llm:

@@ -28,6 +28,26 @@ def register(
     metrics: dict[str, Any],
 ) -> str:
     """Write the artefact, retire the previous promoted model and promote this one."""
+    reason = "first model" if _promoted(wh, settings.schemas.ops).empty else "latest training run"
+    return save_model(
+        wh, settings, bundle, version, train_start, train_end, metrics,
+        status="promoted", reason=reason,
+    )
+
+
+def save_model(
+    wh: Warehouse,
+    settings: Settings,
+    bundle: dict[str, Any],
+    version: str,
+    train_start: datetime,
+    train_end: datetime,
+    metrics: dict[str, Any],
+    *,
+    status: str,
+    reason: str,
+) -> str:
+    """Write the artefact and one registry row. Only ``promoted`` retires the current model."""
     models_dir = settings.models_dir
     models_dir.mkdir(parents=True, exist_ok=True)
     path = models_dir / f"{version}.joblib"
@@ -43,18 +63,19 @@ def register(
                 "train_start": train_start,
                 "train_end": train_end,
                 "metrics_json": json.dumps(metrics, sort_keys=True),
-                "status": "promoted",
-                "reason": "first model" if _promoted(wh, ops).empty else "latest training run",
+                "status": status,
+                "reason": reason,
                 "created_at": datetime.now(),
             }
         ]
     )
     with wh.transaction():
-        wh.execute(
-            f"UPDATE {ops}.MODEL_REGISTRY SET status = 'retired' "
-            "WHERE status = 'promoted' AND model_version <> :v",
-            {"v": version},
-        )
+        if status == "promoted":
+            wh.execute(
+                f"UPDATE {ops}.MODEL_REGISTRY SET status = 'retired' "
+                "WHERE status = 'promoted' AND model_version <> :v",
+                {"v": version},
+            )
         wh.merge_frame(f"{ops}.MODEL_REGISTRY", row, keys=["model_version"])
     return version
 
