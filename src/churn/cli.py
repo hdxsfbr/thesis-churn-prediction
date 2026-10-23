@@ -48,7 +48,7 @@ def bootstrap(reset: bool = typer.Option(False, help="Overwrite edited AGENT_CON
 
 @app.command()
 def synth(
-    scale: str = typer.Option("tiny", help="tiny | small | default"),
+    scale: str = typer.Option("tiny", help="tiny | small | default | full"),
     profile: bool = typer.Option(False, help="Write docs/data-profile.md and CHURN_OPS.DATA_PROFILE"),
 ) -> None:
     """Write all eight synthetic source domains and latent truth into THESIS_SYNTH."""
@@ -90,10 +90,29 @@ def evaluate(
         typer.echo(line + (f" - {t.reason}" if t.reason else ""))
 
 
+def record_cycle_duration(wh, settings: Settings, run_id: str) -> float:
+    """Copy this run's RUNS.duration_s into RUN_METRICS. The runner already stored it on RUNS."""
+    ops = settings.schemas.ops
+    duration = float(wh.query(
+        f"SELECT duration_s FROM {ops}.RUNS WHERE run_id = :r", {"r": run_id},
+    ).iloc[0]["duration_s"])
+    wh.execute(
+        f"DELETE FROM {ops}.RUN_METRICS WHERE run_id = :r AND metric = 'duration_s'",
+        {"r": run_id},
+    )
+    wh.execute(
+        f"INSERT INTO {ops}.RUN_METRICS (run_id, metric, value, recorded_at) "
+        "VALUES (:r, 'duration_s', :v, :t)",
+        {"r": run_id, "v": duration, "t": datetime.now()},
+    )
+    return duration
+
+
 @app.command()
 def cycle(
     as_of: datetime = typer.Option(..., formats=["%Y-%m-%d"], help="Scoring date"),
     run_id: str | None = typer.Option(None, help="Defaults to scheduled-YYYYMMDD"),
+    timed: bool = typer.Option(False, "--timed", help="Record the duration in RUNS and RUN_METRICS"),
 ) -> None:
     """Score every active subscriber into CHURN_OPS.RISK_SCORES."""
     settings, wh = _open()
@@ -103,6 +122,9 @@ def cycle(
         typer.echo(f"run FAILED: {exc}", err=True)
         raise typer.Exit(1) from exc
     typer.echo(f"{result.run_id}: scored {result.scored} of {result.active_in_source} active subscribers")
+    if timed:
+        seconds = record_cycle_duration(wh, settings, result.run_id)
+        typer.echo(f"duration {seconds:.1f}s")
     if result.status == "DEGRADED":
         typer.echo(f"run DEGRADED: gate_mode={result.gate_mode}, agent_halted={result.agent_halted}", err=True)
 
