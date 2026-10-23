@@ -190,6 +190,8 @@ Both need T16's outcomes.
 
 ## Wave 13 — scheduled operation
 
+**Status (2026-10-23):** !47 (T22) is open. The builder count of 237 passed is from the pre-rebase base, not a new combined suite. The daily cron is 06:00 UTC and the retrain cron is Monday 06:00 UTC.
+
 **Tickets:** T22
 
 **Goal:** a worker with the daily cycle, the retrain cron (T18) and catch-up, guarded by the lock (T20).
