@@ -112,6 +112,8 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 
 ## Wave 7 — guardrails, LLM content, extensibility, scale, re-evaluation
 
+**Status (2026-10-23): shipped.** !29 (T12), !30 (T15), !31 (T26), !32 (T27) and !33 (T30) merged. Their pipelines (65849, 65901, 65915, 65959, 65965) passed. Counts below are each ticket's own run, not a new combined suite. T12 used V017, not V007.
+
 **Tickets:** T12, T15, T26, T27, T30
 
 **Goal:**
@@ -122,7 +124,7 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 - T30 (new in Revision 2): reruns the evaluation on the full synthetic data with every view mapped, adds data provenance and domain coverage to the report, and commits the regenerated eval report and model card. It needs T8 (wave 5) and T29 (wave 6).
 
 **Why parallel:** the file sets are disjoint:
-- T12: `agent/guardrails.py`, `agent/cycle.py`, V007
+- T12: `agent/guardrails.py`, `agent/cycle.py`, V017 (V007 was already the archetype columns)
 - T15: `llm/`, `agent/content.py`, `pyproject.toml`, `config/settings.yaml`
 - T26: `interventions/base.py`, the test fixture, `docs/extending.md`
 - T27: `synth/generator.py`, `cli.py`
