@@ -64,7 +64,11 @@ def _import(path: str) -> type[InterventionType]:
 
 
 def load_registry() -> dict[str, InterventionType]:
-    """name -> instance for every type listed in config/interventions.yaml."""
+    """name -> instance for every dotted path in config/interventions.yaml.
+
+    Adding a type is a new InterventionType module plus one line in that file. The policy
+    config still needs a default prior for the new name, or the agent halts at validation.
+    """
     data = yaml.safe_load((config_dir() / "interventions.yaml").read_text()) or {}
     registry: dict[str, InterventionType] = {}
     for path in data.get("interventions") or []:
