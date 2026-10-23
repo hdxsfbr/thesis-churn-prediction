@@ -41,8 +41,10 @@ def migrate() -> None:
 
 @app.command()
 def bootstrap(reset: bool = typer.Option(False, help="Overwrite edited AGENT_CONFIG rows with the defaults")) -> None:
-    """Migrate, then seed CHURN_OPS.AGENT_CONFIG from config/runtime_defaults.yaml (keeps edits)."""
+    """Migrate, seed AGENT_CONFIG, and on Snowflake create the schemas, roles and grants."""
     settings, wh = _open()
+    if settings.backend == "snowflake":
+        wh.execute((settings.sql_dir / "bootstrap" / "roles_and_grants.sql").read_text())
     n = runtime_config.seed(wh, settings, overwrite=reset)
     typer.echo(f"AGENT_CONFIG seeded ({n} default keys{', overwritten' if reset else ', existing kept'})")
 
