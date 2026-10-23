@@ -132,6 +132,8 @@ The plan has 15 waves. The minimum is set by the shared files: `src/churn/cli.py
 
 ## Wave 8 — outcomes and PII proof
 
+**Status (2026-10-23): shipped.** !35 (T16) and !36 (T25) merged. T16's pipeline 66246 and T25's pipeline 66443 passed. Counts below are each ticket's own run, not a new combined suite. T16 used V019, not V010.
+
 **Tickets:** T16, T25
 
 **Goal:**

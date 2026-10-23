@@ -44,3 +44,9 @@
 
 - Preserve scored archetype_low_conf alongside the policy confidence threshold (OR them), require explicit positive finite default priors for every enabled arm, and test critical escalation and a hard floor(N × share) exploration budget when extending policy/registry behavior.
 - Keep T29's latent_archetypes interface and independent [seed,4242]/[seed,4243] streams stable; verify all eight mappings and non-stub feature coverage after generator changes. Tiny profile/default-suite success is not full-scale or live Snowflake proof: T27 owns volume/throughput, T30 full-source re-evaluation, and A10 live verification.
+
+### churn-prediction, wave 8 (2026-10-23)
+
+- The holdout migration is V019, not V010, and the assignment column is `arm_group`. Control is logged as HOLDOUT and is not dispatched. `RUNS.at_risk` stays the full count; T19 subtracts holdout. `churn simulate` is the clock, and the responder is not on the cycle path. A synthetic treated-versus-control rate is not the 90-day impact target.
+- The tiny scored set often contains no control member, so the outbox test uses known keys. Do not delete another test's rows by subscriber_key.
+- There is no FEATURES table. The PII scan reads the feature frame, the training frame, the ops tables, logs, prompts, and the model bytes. `customers_pii` is named only under synth. A phone regex on decoded joblib bytes is binary noise, not a PII signal. A passing tiny scan is not a live-data proof.
