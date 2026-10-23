@@ -180,7 +180,7 @@ Both need T16's outcomes.
 
 ## Wave 12 — API service
 
-**Status (2026-10-23):** !45 (T21) is open. The builder count of 233 passed is from the pre-rebase base, not a new combined suite. The key is required on every route. There is no approval route.
+**Status (2026-10-23): shipped.** !45 (T21) merged. Pipeline 66602 passed. The builder count of 233 passed is from the pre-rebase base, not a new combined suite. The key is required on every route. There is no approval route.
 
 **Tickets:** T21
 

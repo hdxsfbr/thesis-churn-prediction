@@ -714,7 +714,7 @@ Conventions for every ticket:
 
 **Covers:** R8.6.
 
-**Status (2026-10-23):** merge request !45. Builder reported 233 passed, 5 deselected, 1 warning, and ruff passing on the pre-rebase base. The API key is required on every route, including `/health`. There is no approval route.
+**Status (2026-10-23):** merged as !45 and shipped in wave 12. Pipeline 66602 passed. Builder reported 233 passed, 5 deselected, 1 warning, and ruff passing on the pre-rebase base. The API key is required on every route, including `/health`. There is no approval route.
 
 ---
 
