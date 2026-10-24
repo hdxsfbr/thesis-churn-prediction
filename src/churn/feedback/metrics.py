@@ -80,8 +80,10 @@ def compute_run_metrics(log: pd.DataFrame, at_risk: int, duration_s: float | Non
         dispatched_rows = log[log["execution_status"] == "DISPATCHED"]
         dispatched = len(dispatched_rows)
         queued = int((log["execution_status"] == "PENDING_APPROVAL").sum())
-        autonomous = int((dispatched_rows["approval_status"] == "NOT_REQUIRED").sum())
-        approved = int((dispatched_rows["approval_status"] == "APPROVED").sum())
+        # Escalation is the human hand-off, so it is in neither side of the autonomy rate.
+        contact = dispatched_rows[dispatched_rows["intervention_type"] != "escalation"]
+        autonomous = int((contact["approval_status"] == "NOT_REQUIRED").sum())
+        approved = int((contact["approval_status"] == "APPROVED").sum())
         llm_calls = int((log["content_source"] == "llm").sum()) if "content_source" in log.columns else 0
         email = log["intervention_type"].isin(EMAIL_ARMS) if "intervention_type" in log.columns else False
         fallbacks = int(((log["content_source"] == "template") & email).sum()) if "content_source" in log.columns else 0

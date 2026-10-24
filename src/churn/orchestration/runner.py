@@ -26,7 +26,7 @@ from churn.model.registry import load_promoted
 from churn.model.score import score_frame
 from churn.obs.errors import SourceUnavailable, classify, runbook_hint
 from churn.obs.logging import get_logger
-from churn.orchestration.lock import acquire, release
+from churn.orchestration.lock import acquire, heartbeat, release
 from churn.runtime_config import RuntimeConfig, load_pinned
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
@@ -61,8 +61,9 @@ def default_run_id(as_of: date | datetime, kind: str = "scheduled") -> str:
 class _Steps:
     """Logs step start/end/failure and remembers the current step for failure classification."""
 
-    def __init__(self, log) -> None:
+    def __init__(self, log, on_enter=None) -> None:
         self.log = log
+        self.on_enter = on_enter
         self.current: str | None = None
 
     def __call__(self, name: str):
@@ -71,6 +72,8 @@ class _Steps:
         class _Ctx:
             def __enter__(self_inner):
                 steps.current = name
+                if steps.on_enter is not None:
+                    steps.on_enter()
                 steps.log.info("step_start", step=name)
                 self_inner.t0 = time.monotonic()
 
@@ -180,7 +183,7 @@ def _execute(
                at_risk=None, decided=None, dispatched=None, queued=None)  # clear counts of an earlier run with this id
 
     log = get_logger("runner", run_id=run_id)
-    step = _Steps(log)
+    step = _Steps(log, on_enter=lambda: heartbeat(wh, settings, run_id))
     log.info("run_start", kind=kind, as_of=as_of_dt.isoformat())
     active: int | None = None
     scored: int | None = None

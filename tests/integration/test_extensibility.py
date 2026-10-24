@@ -15,11 +15,14 @@ ARM = "dummy_email"
 LINE = "  - tests.fixtures.dummy_intervention.DummyEmail\n"
 
 
-def test_dummy_intervention_dispatched_via_config_only(pipeline):
+def test_dummy_intervention_dispatched_via_config_only(pipeline, tmp_path, monkeypatch):
     wh, settings = pipeline["wh"], pipeline["settings"]
     ops = settings.schemas.ops
     path = config_dir() / "interventions.yaml"
     original_yaml = path.read_text()
+    copy_dir = tmp_path / "config"
+    copy_dir.mkdir()
+    monkeypatch.setattr("churn.interventions.base.config_dir", lambda: copy_dir)
     original_policy = wh.query(
         f"SELECT value_json FROM {ops}.AGENT_CONFIG WHERE key = 'policy'"
     ).iloc[0, 0]
@@ -40,7 +43,7 @@ def test_dummy_intervention_dispatched_via_config_only(pipeline):
         for band in ("<90", "90-365", ">365")
     ]
     try:
-        path.write_text(original_yaml + LINE)
+        (copy_dir / "interventions.yaml").write_text(original_yaml + LINE)
         wh.execute(
             f"UPDATE {ops}.AGENT_CONFIG SET value_json = :v WHERE key = 'policy'",
             {"v": json.dumps(policy)},
@@ -57,7 +60,6 @@ def test_dummy_intervention_dispatched_via_config_only(pipeline):
         sent = wh.query(f"SELECT intervention_type FROM {ops}.OUTBOX")
         assert (sent["intervention_type"] == ARM).any()
     finally:
-        path.write_text(original_yaml)
         wh.execute(
             f"UPDATE {ops}.AGENT_CONFIG SET value_json = :v WHERE key = 'policy'",
             {"v": original_policy},

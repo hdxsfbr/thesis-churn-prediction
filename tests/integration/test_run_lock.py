@@ -48,3 +48,25 @@ def test_stale_lock_taken_over(pipeline):
     result = run_cycle(faulty, settings, AS_OF, run_id="t20-stale")
     assert result.status == "SUCCEEDED"
     assert seen["holder"] == "t20-stale"
+
+
+def test_heartbeat_refreshes_before_the_next_step(pipeline):
+    wh, settings = pipeline["wh"], pipeline["settings"]
+    ops = settings.schemas.ops
+    faulty = FaultyWarehouse(wh)
+    seen: dict[str, datetime] = {}
+
+    def look(name, _shard):
+        if name == "agent":
+            wh.execute(
+                f"UPDATE {ops}.RUN_LOCKS SET heartbeat_at = :old WHERE lock_name = 'cycle'",
+                {"old": datetime.now() - timedelta(seconds=200)},
+            )
+        if name == "outcomes":
+            row = wh.query(f"SELECT heartbeat_at FROM {ops}.RUN_LOCKS WHERE lock_name = 'cycle'")
+            seen["beat"] = pd.Timestamp(row.iloc[0]["heartbeat_at"]).to_pydatetime()
+
+    faulty.before_step = look
+    result = run_cycle(faulty, settings, AS_OF, run_id="submit-heartbeat")
+    assert result.status in {"SUCCEEDED", "DEGRADED"}
+    assert (datetime.now() - seen["beat"].replace(tzinfo=None)).total_seconds() < 30

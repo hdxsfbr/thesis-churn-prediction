@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     volumes:
       - churn-data:/app/artefacts
+    restart: unless-stopped
   worker:
     build:
       context: .
@@ -17,6 +18,7 @@ services:
     env_file: .env
     volumes:
       - churn-data:/app/artefacts
+    restart: unless-stopped
 
 volumes:
   churn-data:

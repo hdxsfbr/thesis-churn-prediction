@@ -1,8 +1,8 @@
 # Deployment
 
-One `python:3.12-slim` image serves both processes. `api` runs `churn serve`. `worker` runs `churn worker`. The image user is `churn`, not root. LightGBM needs `libgomp1`, which the image installs. The image also installs the `snowflake` extra so `CHURN_BACKEND=snowflake` can open the warehouse.
+One `python:3.12-slim` image serves both processes. `api` runs `churn serve`. `worker` runs `churn worker`. The image user is `churn`, not root. LightGBM needs `libgomp1`, which the image installs. The image installs the `snowflake` and `llm` extras. Without a provider key, mail stays on the template even though the SDK is installed. Compose restarts `api` and `worker` unless they are stopped. A blank `CHURN_KEY_PEPPER` with `CHURN_BACKEND=snowflake` refuses to start. The local DuckDB default pepper stays when that variable is unset.
 
-This sandbox does not run Docker. The steps below are the operator checklist. A successful live cycle is not claimed here.
+The image was built locally as `churn-submission:submit`. That build is not a deployed cycle. The steps below are the clean-machine checklist. A live Snowflake cycle is not claimed here.
 
 ## Clean-machine deploy
 
@@ -33,20 +33,20 @@ The pipeline reads logical views. Physical names live only in `config/source_con
 
 Set `schema` to the production schema, then set each view's `object` to the production relation. Keep the logical column names. Change `source` only when the production column has a different name. Run `churn cycle` after the edit. `contract.validate` fails the run before any write if an object or column is missing.
 
-- `subscription_events`: set `object` to the production subscription-event relation.
-- `products`: set `object` to the production product catalog.
-- `email_events`: set `object` to the production email-event relation.
-- `support_tickets`: set `object` to the production support-ticket relation.
-- `quiz_responses`: set `object` to the production quiz-response relation.
-- `customers_pii`: leave `pii: true`. The pipeline validates the metadata and does not render this view. Do not map it into a feature.
-- `subscriptions`: set `object` to the production subscription relation.
-- `orders`: set `object` to the production order relation.
+- `subscription_events`: columns `subscription_id`, `event_id`, `event_type`, `event_ts`. Set `object` to the production subscription-event relation.
+- `products`: columns `blend_sku`, `blend_name`, `goal_category`, `price_usd`. Set `object` to the production product catalog.
+- `email_events`: columns `customer_id`, `event_id`, `event_type`, `campaign_id`, `flow_id`, `event_ts`. Set `object` to the production email-event relation.
+- `support_tickets`: columns `customer_id`, `ticket_id`, `created_at`, `category`, `escalated`, `resolution_hours`, `sentiment_score`. Set `object` to the production support-ticket relation.
+- `quiz_responses`: columns `answer_id`, `customer_id`, `quiz_session_id`, `question_key`, `answer_value`, `answered_at`, `recommended_sku`. Set `object` to the production quiz-response relation.
+- `customers_pii`: columns `customer_id`, `first_name`, `email`, `phone`, `address`. Leave `pii: true`. The pipeline validates the metadata and does not render this view. Do not map it into a feature.
+- `subscriptions`: columns `customer_id`, `subscription_id`, `status`, `started_at`, `cancelled_at`, `cancel_type`, `cancel_reason_code`, `price_usd`, `interval_days`. Set `object` to the production subscription relation.
+- `orders`: columns `order_id`, `customer_id`, `ordered_at`, `blend_sku`, `amount_usd`, `discount_usd`, `refund_usd`, `refunded_at`. Set `object` to the production order relation.
 
 `CHURN_CONTRACT_PATH` can point at a second contract file if you want to keep the synthetic mapping beside the production one. That is still a config change.
 
 ## Live checklist
 
-Not run in this sandbox. On a machine with the Snowflake trial exported into the environment:
+The Snowflake smoke was not run: `SNOWFLAKE_*` was not exported in the submission shell. On a machine with the Snowflake trial exported into the environment:
 
 ```
 docker compose run --rm api churn bootstrap

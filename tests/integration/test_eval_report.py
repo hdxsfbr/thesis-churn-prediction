@@ -61,7 +61,10 @@ def test_report_shows_counts_ceiling_and_recommended_boundary(report):
     assert m["ceilings"]["top_share_precision"] == min(1.0, m["base_rate"] / 0.02)
     assert "recall_breakdown" in m and "boundary" in m
     card = (docs / "model-card.md").read_text()
-    assert "refit on all snapshots" in card
+    assert "evaluation model fitted on the training split only" in card
+    assert f"not from the promoted `{result.model_version}` bundle" in card
+    assert "Promoted model:" in text
+    assert "The evaluation model is fitted on these only" in text
     bd, pb, rb = m["boundary"], m["precision_at_boundary"], m["recall_breakdown"]
     if bd["threshold"] is None:
         assert "none" in card and bd["reason"] in card
@@ -148,7 +151,7 @@ def test_cli_evaluate_without_scale_skips_archetypes(tmp_path, monkeypatch, pipe
 
 
 @pytest.mark.slow
-def test_targets_on_medium_synth(tmp_path_factory):
+def test_targets_on_medium_synth(tmp_path_factory, record_property):
     """R3.6 on a medium synthetic base: top-2% precision > 0.50, lift >= 4x, recall > 0.60, else xfail with reasons."""
     from conftest import make_settings
 
@@ -162,6 +165,11 @@ def test_targets_on_medium_synth(tmp_path_factory):
         result = evaluate(wh, settings, docs_dir=tmp_path_factory.mktemp("docs"), scale="small")
     finally:
         wh.close()
+    metrics = result.metrics
+    record_property("marker", "slow")
+    record_property("top_share_precision", f"{metrics['top_share_precision']:.4f}")
+    record_property("top_decile_lift", f"{metrics['top_decile_lift']:.4f}")
+    record_property("pre_cancellation_recall", f"{metrics['pre_cancellation_recall']:.4f}")
     misses = [t for t in result.targets if t.status == "MISS"]
     if misses:
         pytest.xfail("; ".join(f"{t.name}: {t.reason}" for t in misses))

@@ -824,7 +824,7 @@ def render_model_card(
             f"snapshots after the purge, boundary selection only); holdout the last {holdout_months} months. Synthetic scale: "
             f"{m['splits']['scale'] or 'not given'}."),
             (f"- The numbers come from an evaluation model fitted on the training split only, not from the promoted "
-            f"`{r.model_version}` bundle. The production model is refit on all snapshots."),
+            f"`{r.model_version}` bundle. That promoted version is a separate model."),
             f"- Rows: {r.n_rows}; churn labels: {r.n_positives} (base rate {_pct(m['base_rate'])})",
             f"- ROC-AUC {_num(m['roc_auc'])}, PR-AUC {_num(m['pr_auc'])}, Brier {_num(m['brier'])}",
             *_boundary_lines(r),
