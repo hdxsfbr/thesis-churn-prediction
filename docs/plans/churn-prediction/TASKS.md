@@ -769,6 +769,8 @@ Conventions for every ticket:
 
 **Covers:** R8.7, R1.4.
 
+**Status (2026-10-24):** merged as !49. Pipeline 66727 passed: 250 passed, 6 deselected, 1 warning in 874.51s. The image installs `.[snowflake]`. Docker was not run. A green default suite is not the live cycle.
+
 ---
 
 ## T24 — Snowflake backend, bootstrap of schemas/roles, and SQL portability check
