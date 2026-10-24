@@ -37,10 +37,10 @@ Built on `main` today (requirements traces in
 
 Wave 2's synthetic data generator (T2) is also in the code, but it has no ticket trace yet.
 
-Planned and **not built yet**: the evaluation report, error taxonomy and structured logging, the other three
-intervention types, the Thompson-sampling policy, the Snowflake backend
-and bootstrap, guardrails, LLM-written content, outcomes and feedback loops, the API service, the worker and
-deployment. See `WAVES.md` for the order. Only DuckDB is implemented as a warehouse backend today.
+The operator documents are the current entry point. The ticket table above is the early build log.
+`churn serve` and `churn worker` run the API and the daily schedule. Deployment is
+[`docs/deployment.md`](docs/deployment.md). The Snowflake backend is a separate ticket and is not claimed from
+this document.
 
 **The system currently runs on synthetic data** in its own schema (`THESIS_SYNTH`). It switches to Thesis's real
 views by configuration only, through the source contract (see [Configuration](#configuration)).
@@ -109,6 +109,9 @@ This installs the `churn` command (`churn = churn.cli:app`).
 | `churn synth [--scale tiny\|small\|default]` | Write synthetic subscriptions and orders (and the other source domains) into `THESIS_SYNTH` |
 | `churn train [--as-of YYYY-MM-DD]` | Fit and register a calibrated model on point-in-time snapshots |
 | `churn cycle --as-of YYYY-MM-DD [--run-id ID]` | Score every active subscriber into `CHURN_OPS.RISK_SCORES` and run the agent. The run id defaults to `scheduled-YYYYMMDD` |
+| `churn serve` | Serve the run API on `127.0.0.1:8000`. `CHURN_API_KEY` is required |
+| `churn worker` | Catch up today's cycle, then block on the daily and weekly crons |
+| `churn report-tests --junit junit.xml` | Write `docs/test-results.md` from a pytest JUnit file |
 
 Every command except `migrate` itself also applies pending migrations first. Run `churn --help` for the list.
 
@@ -175,7 +178,7 @@ TreeSHAP tests need `libgomp1`.
 `.gitlab-ci.yml` uses `python:3.12-slim`, installs `libgomp1` and `pip install -e ".[dev]"`, then runs two stages:
 
 1. `lint`: `ruff check src tests`
-2. `test`: `python -m pytest --junitxml=junit.xml` (JUnit report kept as an artifact)
+2. `test`: `python -m pytest --junitxml=junit.xml`, then `churn report-tests` publishes `docs/test-results.md`
 
 ## Data and privacy
 
@@ -190,10 +193,16 @@ TreeSHAP tests need `libgomp1`.
 
 ## Documentation
 
-- [Product requirements (`docs/PRD.md`)](docs/PRD.md)
-- Plan: [PRD](docs/plans/churn-prediction/PRD.md), [ARCHITECTURE](docs/plans/churn-prediction/ARCHITECTURE.md),
-  [TASKS](docs/plans/churn-prediction/TASKS.md), [WAVES](docs/plans/churn-prediction/WAVES.md) and
-  [ticket traces](docs/plans/churn-prediction/tickets/)
+- [Architecture](docs/plans/churn-prediction/ARCHITECTURE.md) and the confirmation list in [decisions](docs/decisions.md)
 - [Source data contract](docs/data-contract.md)
+- [Model card](docs/model-card.md)
+- [Agent logic](docs/agent-logic.md)
+- [Output tables](docs/output-tables.md)
+- [Runbook](docs/runbook.md)
+- [Deployment](docs/deployment.md)
+- [AI usage log](docs/ai-usage-log.md)
+- [Demo script](docs/demo-script.md)
+- [Test results](docs/test-results.md)
+- [Product requirements (`docs/PRD.md`)](docs/PRD.md)
 - [Feature catalogue](docs/features.md)
 - [`CLAUDE.md`](CLAUDE.md): lessons for contributors and agents working in this repository
