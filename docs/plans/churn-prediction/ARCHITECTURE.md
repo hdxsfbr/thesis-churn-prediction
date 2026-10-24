@@ -409,6 +409,8 @@ The sender view is `V013__sender_view.sql`, applied even though later version nu
   - `get_logger` lazily configures JSON logging if not already configured. Optional context fields are bound when supplied; `error_class` is emitted on error records. Taxonomy classification matches class names along the exception MRO.
   - The runner's `_Steps` wrapper emits step start/end records (with duration) and classified failures. The execution order is reconcile → approvals → agent; the queued-count/order regression preserves both persisted and returned counts.
 
+**Wave 15 as built.** `churn report-tests` is the only writer of `docs/test-results.md`. CI runs it after pytest and publishes the file. Slow and scale numbers appear only when those tests are in the JUnit file. The operator set is the architecture, the data contract, the model card, `docs/agent-logic.md`, `docs/output-tables.md`, `docs/runbook.md`, `docs/deployment.md`, `docs/ai-usage-log.md`, and `docs/demo-script.md`. `docs/decisions.md` is the short A1–A12 list for Andre to confirm. The demo video remains an operator check. A synthetic suite pass is not real-world accuracy and does not settle the 90-day impact target.
+
 ## 8. Failure and edge cases
 
 | Case | Behaviour | Req |
