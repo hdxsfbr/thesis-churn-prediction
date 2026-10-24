@@ -80,3 +80,8 @@
 
 - One `python:3.12-slim` image, user `churn`, runs `api` and `worker`. It installs `libgomp1` and `.[snowflake]`. `CHURN_BACKEND` selects the warehouse. The DuckDB file sits on the `churn-data` volume.
 - Switching to production views edits `source_contract.yaml` only. `customers_pii` stays `pii: true`. Docker was not run. The live checklist is not a green default suite.
+
+### churn-prediction, wave 15 (2026-10-23)
+
+- `churn report-tests` is the only writer of `docs/test-results.md`. CI publishes that file from the default suite. Slow and scale numbers appear only when those tests are in the JUnit file.
+- The operator documents are the architecture, data contract, model card, agent logic, output tables, runbook, deployment guide, AI usage log, and demo script. `docs/decisions.md` is the A1–A12 confirmation list. Andre records the demo video. A synthetic suite pass does not settle the 90-day impact target.

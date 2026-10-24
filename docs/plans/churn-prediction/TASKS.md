@@ -918,6 +918,8 @@ Conventions for every ticket:
 
 **Covers:** R9.1, R9.2, R9.3.
 
+**Status (2026-10-24):** merged as !51. Pipeline 66993 passed: 254 passed, 6 deselected, 1 warning in 912.97s. `churn report-tests` writes `docs/test-results.md` from JUnit XML. The demo video was not recorded.
+
 ---
 
 ## T29 — Rebuild the full synthetic source on main and map every contract view (supersedes T2)
