@@ -200,7 +200,7 @@ Both need T16's outcomes.
 
 ## Wave 14 — deployment
 
-**Status (2026-10-23):** T23 is committed locally and waits until T22 is on main. The image user is `churn` and the install includes the Snowflake extra. Docker was not run. R8.7 stays an operator check.
+**Status (2026-10-24):** shipped. !49 merged and pipeline 66727 passed (250 passed, 6 deselected, 1 warning in 874.51s). The image user is `churn` and the install includes the Snowflake extra. Docker was not run. R8.7 stays an operator check.
 
 **Tickets:** T23
 
