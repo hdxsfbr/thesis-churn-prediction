@@ -210,7 +210,7 @@ Both need T16's outcomes.
 
 ## Wave 15 — documentation and deliverables
 
-**Status (2026-10-23):** T28 is committed locally and waits until T23 is on main. The test report is generated from JUnit XML. The demo video is Andre's, and it has not been recorded.
+**Status (2026-10-24):** shipped. !51 merged and pipeline 66993 passed (254 passed, 6 deselected, 1 warning in 912.97s). The test report is generated from JUnit XML. The demo video is Andre's, and it has not been recorded. A synthetic suite pass does not settle the 90-day impact target.
 
 **Tickets:** T28
 

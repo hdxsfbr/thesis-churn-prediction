@@ -918,7 +918,7 @@ Conventions for every ticket:
 
 **Covers:** R9.1, R9.2, R9.3.
 
-**Status (2026-10-23):** built locally, not yet merged. `churn report-tests` writes `docs/test-results.md` from JUnit XML. Builder reported 254 passed, 6 deselected, 1 warning in 87.04s, and ruff passing on the branch that includes T24. The sixth deselected test is the Snowflake smoke. The demo video was not recorded.
+**Status (2026-10-24):** merged as !51. Pipeline 66993 passed: 254 passed, 6 deselected, 1 warning in 912.97s. `churn report-tests` writes `docs/test-results.md` from JUnit XML. The demo video was not recorded.
 
 ---
 
