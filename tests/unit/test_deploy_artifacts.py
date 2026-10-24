@@ -50,6 +50,8 @@ def test_compose_parses_and_defines_api_and_worker():
     assert services["api"]["build"]["dockerfile"] == "docker/Dockerfile"
     assert "serve" in services["api"]["command"]
     assert services["worker"]["command"] == ["churn", "worker"]
+    assert services["api"]["restart"] == "unless-stopped"
+    assert services["worker"]["restart"] == "unless-stopped"
 
 
 def test_dockerfile_non_root_and_python_312():
@@ -59,7 +61,7 @@ def test_dockerfile_non_root_and_python_312():
     assert users
     assert users[-1] != "root"
     assert "libgomp1" in text
-    assert ".[snowflake]" in text
+    assert ".[snowflake,llm]" in text
 
 
 def test_env_example_lists_every_settings_env_var():

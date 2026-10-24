@@ -43,7 +43,12 @@ class Formulation(InterventionType):
         goals = params["goals"]
         goal_clause = f" ({', '.join(goals)})" if goals else ""
         sku = params.get("recommended_sku")
-        sku_clause = f"Based on your quiz we suggest {sku}. " if sku else ""
+        if sku:
+            sku_clause = f"Based on your quiz we suggest {sku}. "
+        elif params["data_source"] == "purchase_history":
+            sku_clause = "This uses your overall email engagement, not a goal-specific rate. "
+        else:
+            sku_clause = ""
         body = BODY.replace("{goal_clause}", goal_clause).replace("{sku_clause}", sku_clause)
         return Content(subject=SUBJECT, body=body, source="template", ref=f"formulation/{params['data_source']}")
 

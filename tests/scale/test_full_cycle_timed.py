@@ -34,16 +34,19 @@ def full_scale(tmp_path_factory):
     wh.close()
 
 
-def test_full_scale_volumes(full_scale):
+def test_full_scale_volumes(full_scale, record_property):
     wh, settings = full_scale["wh"], full_scale["settings"]
     active = count_active(wh, settings, contract_for(settings), AS_OF)
     quiz = int(wh.query("SELECT COUNT(*) AS n FROM THESIS_SYNTH.quiz_responses").iloc[0]["n"])
+    record_property("marker", "scale")
+    record_property("active", str(active))
+    record_property("quiz", str(quiz))
     assert active >= 200_000, active
     assert quiz >= 7_500_000, quiz
     print(f"active={active} quiz={quiz}")
 
 
-def test_full_cycle_within_interval_and_duration_recorded(full_scale, monkeypatch):
+def test_full_cycle_within_interval_and_duration_recorded(full_scale, monkeypatch, record_property):
     wh, settings = full_scale["wh"], full_scale["settings"]
     train(wh, settings)
     monkeypatch.setattr(cli, "_open", lambda: (settings, wh))
@@ -54,6 +57,9 @@ def test_full_cycle_within_interval_and_duration_recorded(full_scale, monkeypatc
     metric = wh.query(
         f"SELECT value FROM {ops}.RUN_METRICS WHERE run_id = 't27-full' AND metric = 'duration_s'"
     ).iloc[0]["value"]
+    record_property("marker", "scale")
+    record_property("duration_s", f"{float(metric):.2f}")
+    record_property("status", str(run["status"]))
     assert run["status"] in ("SUCCEEDED", "DEGRADED")
     assert run["duration_s"] == metric
     assert 0 < metric < INTERVAL_S

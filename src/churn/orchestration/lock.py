@@ -40,6 +40,19 @@ def acquire(wh: Warehouse, settings: Settings, holder: str, ttl_s: int = DEFAULT
     return not row.empty and row.iloc[0]["holder"] == holder
 
 
+def heartbeat(wh: Warehouse, settings: Settings, holder: str) -> None:
+    """Refresh the lock so a long step does not look dead to the next cycle."""
+    ops = settings.schemas.ops
+    wh.execute(
+        f"""
+        UPDATE {ops}.RUN_LOCKS
+        SET heartbeat_at = :now
+        WHERE lock_name = :name AND holder = :holder
+        """,
+        {"now": datetime.now(), "name": LOCK_NAME, "holder": holder},
+    )
+
+
 def release(wh: Warehouse, settings: Settings, holder: str) -> None:
     """Drop the lock only when this holder still owns it."""
     ops = settings.schemas.ops

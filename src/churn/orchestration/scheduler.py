@@ -8,6 +8,7 @@ from datetime import date, datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from churn.obs.logging import get_logger
 from churn.orchestration.runner import RunResult, default_run_id, run_cycle
 from churn.settings import Settings
 from churn.warehouse.base import Warehouse
@@ -60,8 +61,9 @@ class Worker:
     def retrain(self, force: bool = True) -> tuple[str, str] | None:
         """Weekly cron retrains. A daily cycle retrains only when enough new outcomes have closed."""
         try:
-            from churn.feedback.retrain import retrain, retrain_due
-        except ImportError:
+            retrain, retrain_due = _load_retrain()
+        except ImportError as exc:
+            get_logger("worker").error("retrain_import_failed", error_msg=str(exc))
             return None
         if not hasattr(self.settings, "retrain"):
             return None
@@ -78,5 +80,13 @@ class Worker:
         return self.cycle()
 
     def start(self) -> None:
-        self.catch_up()
+        try:
+            self.catch_up()
+        except Exception as exc:  # noqa: BLE001 — a failed catch-up must not stop the scheduler
+            get_logger("worker").error("catch_up_failed", error_msg=str(exc))
         self.scheduler.start()
+
+
+def _load_retrain():
+    from churn.feedback.retrain import retrain, retrain_due
+    return retrain, retrain_due

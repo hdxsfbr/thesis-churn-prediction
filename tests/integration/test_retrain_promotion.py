@@ -137,13 +137,24 @@ def test_worse_candidate_rejected_current_kept(tmp_path, monkeypatch):
     wh, settings, current = _fitted(tmp_path)
 
     real_fit = fit
+    seen: dict = {}
 
     def worse_fit(df, cfg):
+        seen["dates"] = set(pd.to_datetime(df["snapshot_date"]))
         model, metrics = real_fit(df, cfg)
         return Inverted(model), metrics
 
     monkeypatch.setattr("churn.feedback.retrain.fit", worse_fit)
     version, status = retrain(wh, settings)
+    full = build_dataset(wh, settings, contract_for(settings), settings.synth.end_date)
+    from churn.model.evaluate import split_snapshots
+    splits = split_snapshots(
+        sorted(pd.to_datetime(full["snapshot_date"]).unique()),
+        horizon_days=settings.label.horizon_days,
+    )
+    holdout = {pd.Timestamp(d) for d in splits.holdout}
+    assert holdout
+    assert seen["dates"].isdisjoint(holdout)
     assert status == "rejected"
     assert _row(wh, settings, current)["status"] == "promoted"
     assert _row(wh, settings, version)["status"] == "rejected"
