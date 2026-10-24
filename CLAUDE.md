@@ -65,3 +65,8 @@
 
 - Checkpoints and the cycle lock are V020. V012 stays unused. Resume skips finished score and agent shards only when the previous run is `FAILED` or `RUNNING`. A succeeded replay runs again, and insert-only keys keep the first rows.
 - The lock updates only for the same holder or a heartbeat older than 300 seconds. Otherwise the cycle is `SKIPPED` and writes no `RUNS` row. `shards` defaults to 1. Source reads retry three times, then the run fails with no scores. A synthetic checkpoint recovery is not a live kill or a live Snowflake outage.
+
+### churn-prediction, wave 12 (2026-10-23)
+
+- `CHURN_API_KEY` is checked on every route, including `/health`. There is no approval route. `/ready` stays 503 until the warehouse, the migrations, and a promoted model all succeed, and the body lists the reasons.
+- `POST /runs` returns the id and starts the cycle on a thread. The cycle lock stops a second trigger. The DuckDB connection uses an `RLock`, and a transaction holds it. Pin `fastapi` below 0.116.
