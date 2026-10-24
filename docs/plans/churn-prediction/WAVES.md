@@ -190,6 +190,8 @@ Both need T16's outcomes.
 
 ## Wave 13 — scheduled operation
 
+**Status (2026-10-23):** shipped. !47 merged and pipeline 66642 passed (246 passed, 6 deselected, 1 warning in 920.05s). The builder count of 237 passed was the pre-rebase base. The daily cron is 06:00 UTC and the retrain cron is Monday 06:00 UTC.
+
 **Tickets:** T22
 
 **Goal:** a worker with the daily cycle, the retrain cron (T18) and catch-up, guarded by the lock (T20).

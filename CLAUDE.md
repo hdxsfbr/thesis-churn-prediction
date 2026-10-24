@@ -70,3 +70,8 @@
 
 - `CHURN_API_KEY` is checked on every route, including `/health`. There is no approval route. `/ready` stays 503 until the warehouse, the migrations, and a promoted model all succeed, and the body lists the reasons.
 - `POST /runs` returns the id and starts the cycle on a thread. The cycle lock stops a second trigger. The DuckDB connection uses an `RLock`, and a transaction holds it. Pin `fastapi` below 0.116.
+
+### churn-prediction, wave 13 (2026-10-23)
+
+- `schedule.cron` is `0 6 * * *` UTC and `schedule.retrain_cron` is `0 6 * * 1` UTC. Both come from settings. Catch-up runs once when today's scheduled row is missing or not `SUCCEEDED` or `DEGRADED`.
+- The daily job is the cycle, then a retrain only when `retrain_due` is true. The weekly job retrains. The cycle lock is what keeps a second worker from overlapping the same day.
