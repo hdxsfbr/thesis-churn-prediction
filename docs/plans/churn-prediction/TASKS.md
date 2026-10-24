@@ -742,7 +742,7 @@ Conventions for every ticket:
 
 **Covers:** R3.7, R6.3 (trigger).
 
-**Status (2026-10-23):** merge request !47. Builder reported 237 passed, 5 deselected, 1 warning, and ruff passing on the pre-rebase base. Catch-up leaves a `SUCCEEDED` or `DEGRADED` row alone. The daily cycle retrains only when enough new outcomes have closed.
+**Status (2026-10-23):** merged as !47. Pipeline 66642 passed: 246 passed, 6 deselected, 1 warning in 920.05s. The builder count of 237 passed was the pre-rebase base. Catch-up leaves a `SUCCEEDED` or `DEGRADED` row alone. The daily cycle retrains only when enough new outcomes have closed.
 
 ---
 
