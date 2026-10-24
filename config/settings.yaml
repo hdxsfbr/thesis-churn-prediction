@@ -47,6 +47,10 @@ retrain:
   min_new_outcomes: 100
   tolerance: 0.01
 
+schedule:
+  cron: "0 6 * * *"
+  retrain_cron: "0 6 * * 1"
+
 # Email copy. provider anthropic uses ANTHROPIC_API_KEY; openai uses OPENAI_API_KEY.
 # No key means every email stays on its template. Keys are never read from this file.
 llm:
