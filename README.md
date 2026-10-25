@@ -17,12 +17,13 @@ What the finished system does (per the PRD):
 
 ## Current status
 
-The system is built in waves, one ticket per feature slice. The plan is in
-[`docs/plans/churn-prediction/WAVES.md`](docs/plans/churn-prediction/WAVES.md) (15 waves, tickets T1 to T28
-in [`TASKS.md`](docs/plans/churn-prediction/TASKS.md)). The next wave starts once the previous one is merged.
+`main` scores every active subscriber, writes an outbox, and queues high-stakes actions for approval. The enabled interventions are check-in email, formulation, retention offer, and escalation. `churn serve` and `churn worker` run the API and the daily schedule. Start with [`docs/deployment.md`](docs/deployment.md), [`docs/decisions.md`](docs/decisions.md), and [`docs/demo-script.md`](docs/demo-script.md).
 
-Built on `main` today (requirements traces in
-[`docs/plans/churn-prediction/tickets/`](docs/plans/churn-prediction/tickets/)):
+The Snowflake backend is implemented. DuckDB is the local default. A tiny live cycle passed on a Snowflake trial on 2026-10-25. The demo video is recorded from the script; it is not in this repo.
+
+The data in this repository is synthetic (`THESIS_SYNTH`). Thesis's real views are a source-contract edit (see [Configuration](#configuration)).
+
+The plan history is [`docs/plans/churn-prediction/WAVES.md`](docs/plans/churn-prediction/WAVES.md). The table below is the early ticket log, not the whole system.
 
 | Ticket | What exists |
 |---|---|
@@ -35,15 +36,6 @@ Built on `main` today (requirements traces in
 | T10 | Agent thin path: at-risk subscribers get a check-in email row in `OUTBOX` and `INTERVENTION_LOG` |
 | T14 | Threshold gate and approval table: decisions above the risk/cost/discount thresholds go to `CHURN_OPS.APPROVALS` instead of the outbox. Approver edits are processed at the start of each cycle. Subscribers who cancelled since scoring are not sent anything |
 
-Wave 2's synthetic data generator (T2) is also in the code, but it has no ticket trace yet.
-
-The operator documents are the current entry point. The ticket table above is the early build log.
-`churn serve` and `churn worker` run the API and the daily schedule. Deployment is
-[`docs/deployment.md`](docs/deployment.md). The Snowflake backend is a separate ticket and is not claimed from
-this document.
-
-**The system currently runs on synthetic data** in its own schema (`THESIS_SYNTH`). It switches to Thesis's real
-views by configuration only, through the source contract (see [Configuration](#configuration)).
 
 ## Architecture overview
 
@@ -77,8 +69,8 @@ Daily cycle (`churn cycle`):
 If the runtime config is invalid, the cycle fails safe: an invalid gate config means nothing is dispatched
 (the run is marked `DEGRADED`), and other invalid config halts the agent.
 
-Warehouse targets: DuckDB locally (the default, file `artefacts/local.duckdb`). Snowflake is the production
-target but its backend is not built yet. SQL is written to be portable between the two.
+Warehouse targets: DuckDB locally (the default, file `artefacts/local.duckdb`), or Snowflake when
+`CHURN_BACKEND=snowflake`. SQL is written to be portable between the two.
 
 Migrations are `sql/migrations/V###__name.sql`. Each is applied once and its SHA-256 checksum is recorded in
 `CHURN_OPS.SCHEMA_MIGRATIONS`. Editing a shipped migration makes the next run fail with a `MigrationError`, so
@@ -149,7 +141,7 @@ Thesis's real views means editing this file only. Format, validation and logical
 `CHURN_OPS.AGENT_CONFIG`: risk tier boundaries (medium 0.20, high 0.45, critical 0.70) and which tiers count as
 at-risk, plus approval gate, guardrail, holdout and outcome keys. Today the tier keys, the `gate` thresholds
 (`t_risk`, `t_cost_usd`, `t_discount_pct`, `always_approve`) and `guardrails.approval_expiry_h` drive the cycle.
-The other keys are seeded for later tickets. If the `gate` section is missing or invalid, every decision goes to
+The holdout, the policy priors, and the outcome windows also drive the cycle. If the `gate` section is missing or invalid, every decision goes to
 approval. After `churn bootstrap` the table is the source of truth. Each run pins a
 snapshot of it, so a change takes effect on the next run.
 
@@ -162,7 +154,7 @@ logged as `LATE_EDIT` and ignored. Unanswered rows expire after `approval_expiry
 is copied into `INTERVENTION_LOG` (`approval_status`, `decided_by`, `approval_note`, `guardrail_events`).
 
 Other config files: `config/archetype_labels.yaml` (weak labels for the archetype classifier) and
-`config/interventions.yaml` (enabled intervention types, currently the check-in email).
+`config/interventions.yaml` (check-in email, formulation, retention offer, escalation).
 
 ## Testing and CI
 

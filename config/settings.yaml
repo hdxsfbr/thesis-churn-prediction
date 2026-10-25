@@ -26,6 +26,8 @@ synth:
     small: 30000
     default: 350000
     full: 350000
+    # The 36,000-customer draw behind docs/eval-report.md.
+    eval: 36000
 
 model:
   seed: 7
