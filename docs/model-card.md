@@ -17,7 +17,7 @@ Rank active subscribers by the probability of a voluntary cancellation in the ne
 ## Evaluation (holdout 2025-02-28 to 2025-04-30)
 
 - Splits: training 2023-09-30 to 2024-09-30; validation 2024-11-30 to 2024-12-31 (2 snapshots after the purge, boundary selection only); holdout the last 3 months. Synthetic scale: eval.
-- The numbers come from an evaluation model fitted on the training split only, not from the promoted `lgbm-20250630-f1068757` bundle. The production model is refit on all snapshots.
+- The numbers come from an evaluation model fitted on the training split only, not from the promoted `lgbm-20250630-f1068757` bundle. The production model is fit on all snapshots, including the holdout.
 - Rows: 63166; churn labels: 2234 (base rate 3.5%)
 - ROC-AUC 0.856, PR-AUC 0.523, Brier 0.020
 - **Recommended at-risk boundary:** 0.039, the highest threshold whose recall on the validation split is at least 0.65 (validation recall 69.3% over 1341 validation churners). It is a recommendation only: the runtime tiers and `AGENT_CONFIG` are not changed by this report.
