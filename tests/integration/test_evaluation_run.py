@@ -44,13 +44,19 @@ def _metric(wh, settings, name):
 
 
 @pytest.mark.slow
-def test_coverage_above_85_percent(evaluation_run):
+def test_coverage_above_85_percent(evaluation_run, record_property):
     wh, settings, result = evaluation_run
+    coverage = _metric(wh, settings, "coverage")
+    record_property("marker", "slow")
+    record_property("coverage", f"{coverage:.4f}")
     assert result.status == "SUCCEEDED"
-    assert _metric(wh, settings, "coverage") > 0.85
+    assert coverage > 0.85
 
 
 @pytest.mark.slow
-def test_autonomy_above_70_percent_with_default_thresholds(evaluation_run):
+def test_autonomy_above_70_percent_with_default_thresholds(evaluation_run, record_property):
     wh, settings, _result = evaluation_run
-    assert _metric(wh, settings, "autonomy_rate") > 0.70
+    rate = _metric(wh, settings, "autonomy_rate")
+    record_property("marker", "slow")
+    record_property("autonomy_rate", f"{rate:.4f}")
+    assert rate > 0.70

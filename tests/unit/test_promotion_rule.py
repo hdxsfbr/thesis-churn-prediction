@@ -22,6 +22,11 @@ def test_promote_when_within_tolerance():
     assert not ok
     assert "top_decile_precision" in reason
     ok, reason = promotion_decision(
+        {"top_decile_precision": 0.38, "pr_auc": 0.25}, current, 0.01
+    )
+    assert not ok
+    assert "top_decile_precision" in reason
+    ok, reason = promotion_decision(
         {"top_decile_precision": 0.40, "pr_auc": float("nan")}, current, 0.01
     )
     assert not ok

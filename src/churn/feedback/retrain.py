@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -97,6 +97,17 @@ def _version_for(wh: Warehouse, settings: Settings, train_end: date, df: pd.Data
     return version
 
 
+def fit_frame(df: pd.DataFrame, settings: Settings) -> pd.DataFrame:
+    """Training and validation snapshots only. The holdout stays out of fit and calibration."""
+    dates = sorted(pd.to_datetime(df["snapshot_date"]).unique())
+    splits = split_snapshots(dates, horizon_days=settings.label.horizon_days)
+    allowed = {pd.Timestamp(d) for d in [*splits.train, *splits.validation]}
+    out = df[pd.to_datetime(df["snapshot_date"]).isin(allowed)].reset_index(drop=True)
+    if out.empty:
+        raise ModelError("no training or validation snapshots; cannot fit a candidate")
+    return out
+
+
 def retrain(wh: Warehouse, settings: Settings, train_end: date | None = None) -> tuple[str, str]:
     """Fit a candidate. Promote it when the holdout stays within tolerance; otherwise record a rejection.
 
@@ -108,12 +119,15 @@ def retrain(wh: Warehouse, settings: Settings, train_end: date | None = None) ->
     df = build_dataset(wh, settings, contract, train_end)
     if df.empty:
         raise ModelError("no training snapshots; run `churn synth` first")
-    model, fit_metrics = fit(df, settings)
-    archetype_model, archetype_metrics = fit_archetypes(df, weak_labelled_churners(wh, settings, contract), settings)
+    trainable = fit_frame(df, settings)
+    model, fit_metrics = fit(trainable, settings)
+    archetype_model, archetype_metrics = fit_archetypes(
+        trainable, weak_labelled_churners(wh, settings, contract), settings
+    )
     candidate_metrics = score_holdout(model, df, settings)
     current_metrics = score_holdout(current["model"], df, settings)
     promote, reason = promotion_decision(candidate_metrics, current_metrics, settings.retrain.tolerance)
-    version = _version_for(wh, settings, train_end, df)
+    version = _version_for(wh, settings, train_end, trainable)
     metrics: dict[str, Any] = {
         **fit_metrics,
         **archetype_metrics,
@@ -127,8 +141,8 @@ def retrain(wh: Warehouse, settings: Settings, train_end: date | None = None) ->
     save_model(
         wh, settings,
         {"model": model, "features": list(FEATURE_COLUMNS), "version": version, "archetype": archetype_model},
-        version, pd.Timestamp(df["snapshot_date"].min()).to_pydatetime(),
-        datetime(train_end.year, train_end.month, train_end.day),
+        version, pd.Timestamp(trainable["snapshot_date"].min()).to_pydatetime(),
+        pd.Timestamp(trainable["snapshot_date"].max()).to_pydatetime(),
         metrics, status=status, reason=reason,
     )
     return version, status

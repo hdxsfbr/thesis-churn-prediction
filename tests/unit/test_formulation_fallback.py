@@ -24,10 +24,12 @@ def test_with_quiz_uses_quiz_source():
 
 
 def test_without_quiz_uses_purchase_history_source():
-    a = Formulation().action(ctx(has_quiz=False, top_blend_goal="energy", goal_email_engagement=0.4))
+    context = ctx(has_quiz=False, top_blend_goal="energy", goal_email_engagement=0.4)
+    a = Formulation().action(context)
     assert a.params["data_source"] == "purchase_history"
     assert a.params["goals"] == ["energy"]
     assert a.params["goal_email_engagement"] == 0.4
+    assert "overall email engagement" in Formulation().template(context).body
 
 
 def test_no_quiz_and_no_history_still_produces_action():

@@ -73,3 +73,21 @@ Confirm: checkpoints and the run lock are the recovery mechanism.
 Deploy-time files live in `config/`. Tiers, the gate, guardrails, holdout, and policy live in `CHURN_OPS.AGENT_CONFIG` and are snapshotted per run.
 
 Confirm: Metabase remains the editor for `AGENT_CONFIG` and `APPROVALS`.
+
+## Submission pass (2026-10-24)
+
+- Retrain may promote a candidate whose holdout top-decile precision or PR-AUC is at most 0.01 below the current promoted model. That 0.01 is numerical tolerance. It is not permission to ship a worse model. A shortfall of 0.02 rejects the candidate. The candidate is fit and calibrated on the training and validation snapshots only, then scored on the holdout.
+- Email copy stays on the template unless a provider key and its SDK are both present. The image installs the LLM extra. A missing key still uses the template.
+- The 90-day churn-reduction target is not measured. A synthetic pass is not that number.
+- `GET /health` requires the API key, the same as every other route.
+- Escalations are the human hand-off. They are left out of both sides of the autonomy rate.
+- There is no goal-specific email column. When formulation falls back to purchase history, `goal_email_engagement` is `email_open_rate_90`, and the email says it is overall email engagement.
+
+Runs on 2026-10-24, from this checkout:
+
+- `ruff check src tests` passed.
+- Default pytest: 262 passed, 6 deselected, 1 warning. The warning is the existing Pandas4 inplace drop.
+- `pytest -m slow`: 3 passed. On the small synthetic run, top-2% precision 0.7608, top-decile lift 5.5891, pre-cancellation recall 0.6032, coverage 1.0000, autonomy 1.0000. Escalations were excluded from the autonomy rate. A synthetic pass is not the 90-day target.
+- `pytest -m scale`: 2 passed. DuckDB counted 215,649 active subscribers and 19,883,149 quiz rows. The full cycle finished in 60.03 seconds with status SUCCEEDED. That is a DuckDB timing, not a Snowflake timing.
+- Docker image `churn-submission:submit` was built. It imports the Snowflake connector and both LLM SDKs. It was not started as a cycle.
+- The Snowflake smoke did not run. `SNOWFLAKE_*` was unset.

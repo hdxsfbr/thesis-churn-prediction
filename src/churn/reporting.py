@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from datetime import date
 from pathlib import Path
 
 
@@ -37,6 +38,8 @@ def render_junit(xml_text: str) -> str:
                 slow_rows.append(f"| {name} | {marker} | {metrics or case.attrib.get('time', '')} |")
     lines = [
         "# Test results",
+        "",
+        f"Generated {date.today().isoformat()} by `churn report-tests`.",
         "",
         f"- tests: {tests}",
         f"- failures: {failures}",

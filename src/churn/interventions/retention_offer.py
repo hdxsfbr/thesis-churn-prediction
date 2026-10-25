@@ -35,7 +35,7 @@ class RetentionOffer(InterventionType):
     name = "retention_offer"
     channel = "email"
 
-    def _choose(self, context: AgentContext) -> tuple[str, float]:
+    def _choose(self, context: AgentContext) -> tuple[str, float, str | None]:
         cap = context.max_discount_pct
         eligible = [c for c in context.offer_catalogue if c in OFFERS and OFFERS[c][0] <= cap]
         if not eligible:
@@ -47,21 +47,29 @@ class RetentionOffer(InterventionType):
                     f"known codes: {sorted(OFFERS)}"
                 )
             code = _cost_sorted(known)[0]
-            return code, min(OFFERS[code][0], cap)
+            discount = min(OFFERS[code][0], cap)
+            if discount != OFFERS[code][0]:
+                # The catalogue code names a larger percent. The returned code names the percent applied.
+                shown = int(discount) if float(discount).is_integer() else discount
+                return f"PCT_{shown:g}_CAPPED", discount, code
+            return code, discount, None
         ordered = _cost_sorted(eligible)
         best = ordered[0]
         for nxt in ordered[1:]:
             gain = (OFFERS[nxt][2] - OFFERS[best][2]) * context.risk * VALUE_USD
             if gain > OFFERS[nxt][1] - OFFERS[best][1]:
                 best = nxt
-        return best, min(OFFERS[best][0], cap)
+        return best, min(OFFERS[best][0], cap), None
 
     def action(self, context: AgentContext) -> Action:
-        code, discount = self._choose(context)
-        return Action(params={"offer": code}, offer_code=code, discount_pct=discount)
+        code, discount, clipped_from = self._choose(context)
+        params = {"offer": code}
+        if clipped_from is not None:
+            params["clipped_from"] = clipped_from
+        return Action(params=params, offer_code=code, discount_pct=discount)
 
     def template(self, context: AgentContext) -> Content:
-        code, discount = self._choose(context)
+        code, discount, _clipped = self._choose(context)
         description = f"{discount:g}% off" if discount else code.replace("_", " ").lower()
         body = BODY.replace("{description}", description).replace("{code}", code)
         return Content(subject=SUBJECT, body=body, source="template", ref=f"retention_offer/{code}")
@@ -69,6 +77,7 @@ class RetentionOffer(InterventionType):
     def cost_usd(self, context: AgentContext | Action) -> float:
         # The gate costs the selected action; policy callers may still supply context.
         if isinstance(context, Action):
-            return OFFERS[context.offer_code][1]
-        code, _ = self._choose(context)
-        return OFFERS[code][1]
+            code = context.offer_code if context.offer_code in OFFERS else context.params.get("clipped_from")
+            return OFFERS[code][1]
+        code, _, clipped = self._choose(context)
+        return OFFERS[clipped or code][1]

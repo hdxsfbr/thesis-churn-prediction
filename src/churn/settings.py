@@ -89,7 +89,10 @@ class Settings(BaseModel):
             data.setdefault("warehouse", {})["path"] = os.environ["CHURN_DUCKDB_PATH"]
         if os.environ.get("CHURN_CONTRACT_PATH"):
             data["contract_path"] = os.environ["CHURN_CONTRACT_PATH"]
-        data["key_pepper"] = os.environ.get("CHURN_KEY_PEPPER", "dev-pepper-not-secret")
+        pepper = os.environ.get("CHURN_KEY_PEPPER", "dev-pepper-not-secret")
+        if data.get("backend") == "snowflake" and not str(pepper).strip():
+            raise ValueError("CHURN_KEY_PEPPER must be non-empty when CHURN_BACKEND=snowflake")
+        data["key_pepper"] = pepper
         return cls.model_validate(data)
 
     def resolve(self, rel: str) -> Path:

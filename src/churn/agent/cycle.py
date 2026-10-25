@@ -189,6 +189,10 @@ def run_agent(
         features = build_features(wh, settings, contract_for(settings), pd.Timestamp(as_of).to_pydatetime())
         by_key = features.set_index('subscriber_key').to_dict('index')
         score_rows = group.set_index('subscriber_key').to_dict('index')
+        from churn.agent.profile import formulation_signals
+        signals = formulation_signals(
+            wh, settings, pd.Timestamp(as_of).to_pydatetime(), set(score_rows)
+        )
         for c in contexts:
             if c.subscriber_key not in score_rows:
                 continue
@@ -204,6 +208,13 @@ def run_agent(
                 data["max_discount_pct"] = cfg.guardrails.max_discount_pct
                 data["offer_catalogue"] = tuple(cfg.guardrails.offer_catalogue)
             rate = f.get('email_open_rate_90')
+            sig = signals.get(c.subscriber_key, {})
+            data["has_quiz"] = bool(sig.get("has_quiz"))
+            data["quiz_goals"] = list(sig.get("quiz_goals") or [])
+            data["recommended_sku"] = sig.get("recommended_sku")
+            data["top_blend_goal"] = sig.get("top_blend_goal")
+            # No goal-specific email column exists; the purchase-history copy says so.
+            data["goal_email_engagement"] = float(rate) if pd.notna(rate) else None
             enriched.append(PolicyContext(**data, tenure_days=f.get('tenure_days', 0),
                 email_open_rate=float(rate) if pd.notna(rate) else None,
                 archetype_probs=json.loads(probs) if isinstance(probs, str) else {}))
