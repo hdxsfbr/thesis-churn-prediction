@@ -16,15 +16,26 @@ def check_frame(df: pd.DataFrame, keys: Sequence[str]) -> None:
 
 
 def build_merge_sql(
-    table: str, stage: str, columns: Sequence[str], keys: Sequence[str], insert_only: bool = False
+    table: str,
+    stage: str,
+    columns: Sequence[str],
+    keys: Sequence[str],
+    insert_only: bool = False,
+    casts: dict[str, str] | None = None,
 ) -> str:
+    def src(column: str) -> str:
+        typ = casts.get(column) if casts else None
+        if typ:
+            return f"CAST(s.{column} AS {typ})"
+        return f"s.{column}"
+
     on = " AND ".join(f"t.{k} = s.{k}" for k in keys)
     updatable = [c for c in columns if c not in keys]
     parts = [f"MERGE INTO {table} t USING {stage} s ON {on}"]
     if updatable and not insert_only:
-        parts.append("WHEN MATCHED THEN UPDATE SET " + ", ".join(f"{c} = s.{c}" for c in updatable))
+        parts.append("WHEN MATCHED THEN UPDATE SET " + ", ".join(f"{c} = {src(c)}" for c in updatable))
     parts.append(
         "WHEN NOT MATCHED THEN INSERT (" + ", ".join(columns) + ") VALUES ("
-        + ", ".join(f"s.{c}" for c in columns) + ")"
+        + ", ".join(src(c) for c in columns) + ")"
     )
     return " ".join(parts)

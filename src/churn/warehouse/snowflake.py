@@ -15,6 +15,11 @@ from churn.warehouse.bulk import build_merge_sql, check_frame
 from churn.warehouse.dialect import render, render_many
 
 _PARAM = re.compile(r":([A-Za-z_]\w*)")
+# information_schema DATA_TYPE values we will cast to. Anything else is left uncast.
+_CAST_OK = {
+    "TEXT", "NUMBER", "FLOAT", "BOOLEAN", "DATE", "TIME", "BINARY", "VARIANT",
+    "OBJECT", "ARRAY", "TIMESTAMP_NTZ", "TIMESTAMP_LTZ", "TIMESTAMP_TZ",
+}
 _REQUIRED = {
     "account": "SNOWFLAKE_ACCOUNT",
     "user": "SNOWFLAKE_USER",
@@ -111,15 +116,35 @@ class SnowflakeWarehouse:
         from snowflake.connector.pandas_tools import write_pandas
 
         self._stage_n += 1
+        schema_name = table.split(".", 1)[0] if "." in table else None
         stage = f"MERGE_STAGE_{self._stage_n}"
+        qualified = f"{schema_name}.{stage}" if schema_name else stage
+        casts = self._target_casts(table, list(df.columns))
         write_pandas(
-            self.con, df, stage, auto_create_table=True, table_type="temporary", quote_identifiers=False
+            self.con, df, stage, schema=schema_name, auto_create_table=True, table_type="temporary",
+            quote_identifiers=False, use_logical_type=True,
         )
         try:
-            self.execute(build_merge_sql(table, stage, list(df.columns), keys, insert_only))
+            self.execute(build_merge_sql(table, qualified, list(df.columns), keys, insert_only, casts))
         finally:
-            self.execute(f"DROP TABLE IF EXISTS {stage}")
+            self.execute(f"DROP TABLE IF EXISTS {qualified}")
         return len(df)
+
+    def _target_casts(self, table: str, columns: Sequence[str]) -> dict[str, str]:
+        """Cast staged values to the live column types.
+
+        An all-null pandas column is uploaded as NUMBER. MERGE then rejects it when the
+        real column is TIMESTAMP_NTZ or TEXT.
+        """
+        schema_name, name = table.split(".", 1) if "." in table else (None, table)
+        sql = "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = :name"
+        params: dict[str, Any] = {"name": name.upper()}
+        if schema_name:
+            sql += " AND table_schema = :schema"
+            params["schema"] = schema_name.upper()
+        rows = self.query(sql, params)
+        types = {str(row.column_name).upper(): str(row.data_type).upper() for row in rows.itertuples()}
+        return {col: types[col.upper()] for col in columns if types.get(col.upper()) in _CAST_OK}
 
     def insert_frame(self, table: str, df: pd.DataFrame) -> int:
         if df.empty:
