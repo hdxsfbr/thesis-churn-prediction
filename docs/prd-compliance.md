@@ -8,7 +8,7 @@ Status of the plan requirements after the 2026-10-24 submission run. Counts and 
 | R1.2 | Met on DuckDB | Scale run: 215,649 active subscribers and 19,883,149 quiz rows. Edge-case shares are covered by the default suite. |
 | R1.3 | Met | The pipeline reads contract views. The contract-swap test passes in the default suite. |
 | R1.4 | Met | `docs/deployment.md` names each view and its columns. Those steps are a config edit. |
-| R1.5 | Partial | Reads and writes go through the warehouse. There is no Shopify, Klaviyo, or Zendesk client. The submission run used DuckDB. Live Snowflake was not executed. |
+| R1.5 | Partial | Reads and writes go through the warehouse. There is no Shopify, Klaviyo, or Zendesk client. The submission metrics used DuckDB. On 2026-10-25 the Snowflake smoke passed on the trial account: tiny migrate, synth, train, one cycle, SUCCEEDED, scored greater than 0, 196.85s. |
 | R1.6 | Met | All eight views are mapped. `customers_pii` stays `pii: true` and is not rendered. The default suite includes the domain and PII tests. |
 | R1.7 | Met | The full synthetic source is on main. The scale run is the volume check. The default suite includes the latent-archetype tests. |
 | R2.1–R2.4 | Met | Feature tests in the default suite, including leakage and incomplete-data scoring. |
@@ -39,7 +39,7 @@ Status of the plan requirements after the 2026-10-24 submission run. Counts and 
 | R8.4 | Met on DuckDB | Full cycle 60.03 seconds for 215,649 active subscribers, inside the daily interval. Not a Snowflake timing. |
 | R8.5 | Met | A dummy arm is added from a temporary copy of the intervention config. The real file is not rewritten. |
 | R8.6 | Met | `GET /health` returns ok when `X-API-Key` is sent. The key is required on every route, including health. |
-| R8.7 | Partial | Image `churn-submission:submit` was built with the `snowflake` and `llm` extras. It was not started as a cycle. The Snowflake smoke did not run. `docs/deployment.md` keeps the clean-machine checklist. |
+| R8.7 | Partial | Image `churn-submission:submit` was built with the `snowflake` and `llm` extras. It was not started as a cycle. The Snowflake smoke passed on 2026-10-25 from the local checkout, not from that image. `docs/deployment.md` keeps the clean-machine checklist. |
 | R9.1 | Met | Default, slow, and scale runs passed. `docs/test-results.md` is that report. |
 | R9.2 | Met | Architecture, data contract, model card, agent logic, output tables, runbook, and deployment guide are in `docs/`. |
 | R9.3 | Partial | Source, docs, deployment guide, test results, and the AI usage log are in the repo. The demo script is `docs/demo-script.md`. The video is not recorded. |

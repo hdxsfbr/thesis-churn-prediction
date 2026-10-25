@@ -5,6 +5,8 @@ from pathlib import Path
 
 import sqlglot
 
+from churn.warehouse.dialect import render_many
+
 ROOT = Path("sql")
 COMMENT = re.compile(r"--.*?$", re.MULTILINE)
 TOKENS = {
@@ -51,3 +53,11 @@ def test_every_sql_file_transpiles_to_duckdb():
         "GRANT USAGE ON SCHEMA CHURN_OPS TO ROLE CHURN_APPROVER;",
         "GRANT SELECT, UPDATE ON TABLE CHURN_OPS.APPROVALS TO ROLE CHURN_APPROVER;",
     ]
+
+
+def test_snowflake_split_ignores_semicolons_inside_comments():
+    for name in ("V009__approvals.sql", "V016__policy_stats.sql", "V020__run_steps_locks.sql"):
+        statements = render_many((ROOT / "migrations" / name).read_text(), "snowflake")
+        assert statements
+        assert all(not s.lstrip().startswith("--") for s in statements)
+        assert any(s.lstrip().upper().startswith(("CREATE", "ALTER")) for s in statements)

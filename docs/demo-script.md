@@ -4,7 +4,7 @@ About eight minutes. Andre records it from a clean checkout of main. The warehou
 
 ## 1. What the cycle does (about one minute)
 
-Show the README, then `docs/decisions.md`. Say the cycle scores active subscribers and writes an outbox. It does not send mail. The 90-day churn reduction is not measured. The Snowflake smoke did not run in the submission shell.
+Show the README, then `docs/decisions.md`. Say the cycle scores active subscribers and writes an outbox. It does not send mail. The 90-day churn reduction is not measured. The Snowflake smoke passed on 2026-10-25: tiny synthetic data, one cycle, SUCCEEDED. This demo still uses DuckDB.
 
 ## 2. Score a tiny population (about two minutes)
 
@@ -121,4 +121,4 @@ Say the holdout row has no outbox row. Read the coverage and autonomy values. Au
 
 ## 7. Close (about thirty seconds)
 
-Point at `docs/deployment.md`. Say the clean-machine checklist is the deploy path. The image `churn-submission:submit` was built and was not started as a cycle. The Snowflake smoke did not run. The 90-day reduction is not measured. Stop the recording.
+Point at `docs/deployment.md`. Say the clean-machine checklist is the deploy path. The image `churn-submission:submit` was built and was not started as a cycle. The Snowflake smoke passed on 2026-10-25 from the local checkout, not from that image. The 90-day reduction is not measured. Stop the recording.

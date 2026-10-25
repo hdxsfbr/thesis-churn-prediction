@@ -32,3 +32,15 @@ What the agent did on this pass:
 - Built the local image `churn-submission:submit`. Did not start it as a cycle.
 - Did not run the Snowflake smoke. `SNOWFLAKE_*` was not exported. No credentials were written into the repo.
 - Did not record the demo video. The script is `docs/demo-script.md`.
+
+## Snowflake smoke (2026-10-25)
+
+An agent ran `pytest -o addopts= -m snowflake` against the trial account after the human installed a key pair and created the warehouse and database. The test passed in 196.85s: migrate, tiny synthetic population, train, one cycle, status SUCCEEDED, scored greater than 0.
+
+What the agent changed so that run could finish:
+
+- `merge_frame` uploads timestamps with `use_logical_type` and writes the stage into the target schema.
+- Snowflake statement splitting ignores semicolons that sit inside `--` comments.
+- MERGE casts each staged column to the live column type, because an all-null pandas column arrives as NUMBER.
+
+No password, private key, or pepper was written into the repo. The demo video was not recorded. The image was not started as a cycle. The 90-day reduction was not measured.
