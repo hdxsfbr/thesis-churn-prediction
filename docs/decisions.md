@@ -90,4 +90,6 @@ Runs on 2026-10-24, from this checkout:
 - `pytest -m slow`: 3 passed. On the small synthetic run, top-2% precision 0.7608, top-decile lift 5.5891, pre-cancellation recall 0.6032, coverage 1.0000, autonomy 1.0000. Escalations were excluded from the autonomy rate. A synthetic pass is not the 90-day target.
 - `pytest -m scale`: 2 passed. DuckDB counted 215,649 active subscribers and 19,883,149 quiz rows. The full cycle finished in 60.03 seconds with status SUCCEEDED. That is a DuckDB timing, not a Snowflake timing.
 - Docker image `churn-submission:submit` was built. It imports the Snowflake connector and both LLM SDKs. It was not started as a cycle.
-- The Snowflake smoke did not run. `SNOWFLAKE_*` was unset.
+- The Snowflake smoke did not run on 2026-10-24. `SNOWFLAKE_*` was unset.
+
+The smoke ran on 2026-10-25 against the trial account, from this checkout, with key-pair auth and no password. `pytest -o addopts= -m snowflake` passed in 196.85s: migrate, tiny synthetic population, train, one cycle, status SUCCEEDED, scored greater than 0. That is not the DuckDB scale timing and not the 90-day impact number. The merge casts an all-null staged column to the live column type so a null `ended_at` can land in `TIMESTAMP_NTZ`.

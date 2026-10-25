@@ -2,7 +2,7 @@
 
 One `python:3.12-slim` image serves both processes. `api` runs `churn serve`. `worker` runs `churn worker`. The image user is `churn`, not root. LightGBM needs `libgomp1`, which the image installs. The image installs the `snowflake` and `llm` extras. Without a provider key, mail stays on the template even though the SDK is installed. Compose restarts `api` and `worker` unless they are stopped. A blank `CHURN_KEY_PEPPER` with `CHURN_BACKEND=snowflake` refuses to start. The local DuckDB default pepper stays when that variable is unset.
 
-The image was built locally as `churn-submission:submit`. That build is not a deployed cycle. The steps below are the clean-machine checklist. A live Snowflake cycle is not claimed here.
+The image was built locally as `churn-submission:submit`. That build is not a deployed cycle. The steps below are the clean-machine checklist. The 2026-10-25 smoke ran from the local checkout, not from this image.
 
 ## Clean-machine deploy
 
@@ -46,7 +46,7 @@ Set `schema` to the production schema, then set each view's `object` to the prod
 
 ## Live checklist
 
-The Snowflake smoke was not run: `SNOWFLAKE_*` was not exported in the submission shell. On a machine with the Snowflake trial exported into the environment:
+On 2026-10-25, `pytest -o addopts= -m snowflake` passed in 196.85s against the trial account: migrate, tiny synth, train, one cycle, status SUCCEEDED, scored greater than 0. That run used the local checkout and key-pair auth. It was not `docker compose`. On a clean machine, with the trial exported into the environment:
 
 ```
 docker compose run --rm api churn bootstrap

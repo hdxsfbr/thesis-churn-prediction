@@ -100,11 +100,12 @@ def test_no_pii_in_logs_tables_or_model_artefacts(pipeline):
     wh, settings = pipeline["wh"], pipeline["settings"]
     exact, names = _pii_values(wh)
     assert exact and names
+    run_id = "t25-pii"
     buf = io.StringIO()
     configure_logging(stream=buf)
     fake = FakeLLM()
     with override_llm(fake, LLMConfig(max_calls_per_run=30, retries=1, concurrency=4)):
-        run_cycle(wh, settings, AS_OF, run_id="t25-pii")
+        run_cycle(wh, settings, AS_OF, run_id=run_id)
     contract = contract_for(settings)
     features = build_features(wh, settings, contract, AS_OF)
     training = build_dataset(wh, settings, contract, settings.synth.end_date)
@@ -115,8 +116,19 @@ def test_no_pii_in_logs_tables_or_model_artefacts(pipeline):
         "features": "\n".join(_strings(features)),
         "training": "\n".join(_strings(training)),
     }
-    for table in ("RISK_SCORES", "INTERVENTION_LOG", "OUTBOX", "APPROVALS"):
-        blobs[table] = "\n".join(_strings(wh.query(f"SELECT * FROM {ops}.{table}")))
+    # The warehouse is session-scoped. Other tests store an approver address in decided_by.
+    # This scan covers the cycle just run.
+    for table in ("RISK_SCORES", "INTERVENTION_LOG", "APPROVALS"):
+        blobs[table] = "\n".join(
+            _strings(wh.query(f"SELECT * FROM {ops}.{table} WHERE run_id = :r", {"r": run_id}))
+        )
+    blobs["OUTBOX"] = "\n".join(
+        _strings(wh.query(
+            f"SELECT o.* FROM {ops}.OUTBOX o WHERE o.outbox_id IN "
+            f"(SELECT decision_id FROM {ops}.INTERVENTION_LOG WHERE run_id = :r)",
+            {"r": run_id},
+        ))
+    )
     version = wh.query(
         f"SELECT artefact_uri FROM {ops}.MODEL_REGISTRY WHERE status = 'promoted'"
     ).iloc[0]["artefact_uri"]

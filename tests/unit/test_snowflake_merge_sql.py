@@ -24,6 +24,16 @@ def test_generated_merge_is_keyed_and_idempotent(fresh_wh):
     assert float(out.iloc[0]["v"]) == 2.0
 
 
+def test_merge_casts_null_stage_columns_to_the_target_type():
+    sql = build_merge_sql(
+        "CHURN_OPS.RUNS", "CHURN_OPS.MERGE_STAGE_1", ["run_id", "ended_at", "error_msg"], ["run_id"],
+        casts={"ended_at": "TIMESTAMP_NTZ", "error_msg": "TEXT"},
+    )
+    assert "ended_at = CAST(s.ended_at AS TIMESTAMP_NTZ)" in sql
+    assert "CAST(s.error_msg AS TEXT)" in sql
+    assert "ON t.run_id = s.run_id" in sql
+
+
 def test_credentials_only_from_env(monkeypatch):
     names = [
         "SNOWFLAKE_ACCOUNT",
